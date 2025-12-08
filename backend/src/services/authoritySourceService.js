@@ -153,7 +153,7 @@ class AuthoritySourceService {
    * 🎯 核心方法：為給定主題動態生成權威來源
    */
   static async getAuthoritySources(keyword, options = {}) {
-    const { provider = 'ollama', maxSources = 3 } = options;
+    const { provider = 'gemini', maxSources = 3 } = options;
 
     try {
       // 步驟 1: AI 識別領域與權威關鍵詞
@@ -425,7 +425,7 @@ ${keyword}
    * 🆕 升級為「意圖感知模擬」，根據查詢類型返回對應性質的來源
    */
   static async simulateSearch(searchQuery, domainInfo) {
-    const { provider = 'ollama' } = {};
+    const { provider = 'gemini' } = {};
 
     // 根據查詢類型調整 Prompt，強制 AI 模擬出該類型的來源
     let specificInstruction = '';

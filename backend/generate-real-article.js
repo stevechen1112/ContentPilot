@@ -41,7 +41,7 @@ async function generate() {
 
   try {
     const article = await ArticleService.generateArticle(outline, { 
-      provider: 'ollama',
+      provider: 'gemini',
       style_guide: { tone: '專業且鼓勵人心' }
     });
 

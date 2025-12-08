@@ -13,13 +13,11 @@ class OutlineService {
         target_audience = '一般讀者',
         tone = '專業但易懂',
         word_count = 2000,
-        provider = 'ollama'
+        provider = 'gemini'
       } = options;
 
-      // 混合模式策略：大綱生成屬於高智商任務，強制使用 Gemini
-      const effectiveProvider = provider === 'hybrid' ? 'gemini' : provider;
-      console.log(`🤖 大綱生成模型: ${effectiveProvider} ${provider === 'hybrid' ? '(Hybrid Mode)' : ''}`);
-      console.log(`DEBUG: provider=${provider}, effectiveProvider=${effectiveProvider}`);
+      // 全面使用 Gemini
+      console.log(`🤖 大綱生成模型: ${provider}`);
 
       // S2 & S3: 使用 SERP 資料與競爭對手分析
       let serpAnalysis = serp_data || {
@@ -64,7 +62,7 @@ class OutlineService {
 
       // 呼叫 AI 生成大綱
       const result = await AIService.generate(prompt, {
-        provider: effectiveProvider,
+        provider,
         temperature: 0.6,
         max_tokens: 2048
       });
@@ -280,7 +278,7 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
    * 優化現有大綱（人工修改後重新調整）
    */
   static async optimizeOutline(outline, feedback, options = {}) {
-    const { provider = 'ollama' } = options;
+    const { provider = 'gemini' } = options;
 
     const prompt = `你是一位 SEO 內容策劃師。請根據使用者的反饋，優化以下文章大綱。
 

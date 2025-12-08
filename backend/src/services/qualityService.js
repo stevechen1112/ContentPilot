@@ -9,7 +9,7 @@ class QualityService {
       const {
         target_keyword = '',
         serp_data = null,
-        provider = 'ollama'
+        provider = 'gemini'
       } = options;
 
       // 並行執行多個檢查
@@ -54,7 +54,7 @@ class QualityService {
   /**
    * E-E-A-T 檢查清單驗證
    */
-  static async checkEEAT(article, provider = 'ollama') {
+  static async checkEEAT(article, provider = 'gemini') {
     const prompt = `你是一位專業的內容品質審核專家。請根據 Google 的 E-E-A-T 標準，檢查以下文章。
 
 ## 文章內容

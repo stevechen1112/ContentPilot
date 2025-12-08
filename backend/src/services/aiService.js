@@ -1,5 +1,4 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const axios = require('axios');
 
 // 懶加載 AI 客戶端（只在需要時初始化）
 let gemini = null;
@@ -53,84 +52,21 @@ class AIService {
     }
   }
 
-  /**
-   * 呼叫 Ollama API (本地端)
-   */
-  static async callOllama(prompt, options = {}) {
-    try {
-      const {
-        model = process.env.OLLAMA_MODEL || 'deepseek-r1:32b',
-        temperature = parseFloat(process.env.OLLAMA_TEMPERATURE) || 0.7,
-        system = null,
-        base_url = process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
-      } = options;
-
-      const messages = [];
-
-      if (system) {
-        messages.push({
-          role: 'system',
-          content: system
-        });
-      }
-
-      messages.push({
-        role: 'user',
-        content: prompt
-      });
-
-      const response = await axios.post(`${base_url}/api/chat`, {
-        model,
-        messages,
-        stream: false,
-        options: {
-          temperature
-        }
-      });
-
-      return {
-        content: response.data.message.content,
-        usage: {
-          prompt_tokens: response.data.prompt_eval_count || 0,
-          completion_tokens: response.data.eval_count || 0,
-          total_tokens: (response.data.prompt_eval_count || 0) + (response.data.eval_count || 0)
-        },
-        model: response.data.model
-      };
-    } catch (error) {
-      console.error('Ollama API Error:', error.response?.data || error.message);
-      throw new Error(`Ollama API failed: ${error.message}`);
-    }
-  }
 
   /**
-   * 通用 AI 呼叫（根據設定選擇 Provider）
+   * 通用 AI 呼叫（強制使用 Gemini）
    */
   static async generate(prompt, options = {}) {
-    const { provider = 'ollama', ...restOptions } = options;
-
-    if (provider === 'gemini') {
-      return await this.callGemini(prompt, restOptions);
-    } else if (provider === 'ollama') {
-      return await this.callOllama(prompt, restOptions);
-    } else {
-      throw new Error(`Unsupported AI provider: ${provider}`);
-    }
+    // 忽略 provider 參數，強制使用 Gemini
+    return await this.callGemini(prompt, options);
   }
 
   /**
-   * Stream 模式生成（用於即時顯示）
+   * Stream 模式生成（強制使用 Gemini）
    */
   static async generateStream(prompt, options = {}, onChunk) {
-    const { provider = 'ollama', ...restOptions } = options;
-
-    if (provider === 'gemini') {
-      return await this.streamGemini(prompt, restOptions, onChunk);
-    } else if (provider === 'ollama') {
-      return await this.streamOllama(prompt, restOptions, onChunk);
-    } else {
-      throw new Error(`Unsupported AI provider: ${provider}`);
-    }
+    // 忽略 provider 參數，強制使用 Gemini
+    return await this.streamGemini(prompt, options, onChunk);
   }
 
   /**
@@ -169,65 +105,6 @@ class AIService {
     return fullContent;
   }
 
-  /**
-   * Ollama Stream
-   */
-  static async streamOllama(prompt, options = {}, onChunk) {
-    const {
-      model = process.env.OLLAMA_MODEL || 'deepseek-r1:32b',
-      temperature = parseFloat(process.env.OLLAMA_TEMPERATURE) || 0.7,
-      system = null,
-      base_url = process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
-    } = options;
-
-    const messages = [];
-
-    if (system) {
-      messages.push({ role: 'system', content: system });
-    }
-
-    messages.push({ role: 'user', content: prompt });
-
-    const response = await axios.post(`${base_url}/api/chat`, {
-      model,
-      messages,
-      stream: true,
-      options: {
-        temperature
-      }
-    }, {
-      responseType: 'stream'
-    });
-
-    let fullContent = '';
-
-    return new Promise((resolve, reject) => {
-      response.data.on('data', (chunk) => {
-        const lines = chunk.toString().split('\n').filter(line => line.trim());
-        for (const line of lines) {
-          try {
-            const json = JSON.parse(line);
-            if (json.message?.content) {
-              const text = json.message.content;
-              fullContent += text;
-              if (onChunk) {
-                onChunk(text);
-              }
-            }
-            if (json.done) {
-              resolve(fullContent);
-            }
-          } catch (e) {
-            // Skip invalid JSON lines
-          }
-        }
-      });
-
-      response.data.on('error', (error) => {
-        reject(new Error(`Ollama stream failed: ${error.message}`));
-      });
-    });
-  }
 
   /**
    * 批量生成（多個 prompt 並行處理）

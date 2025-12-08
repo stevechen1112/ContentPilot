@@ -118,7 +118,7 @@ class ArticleController {
       await ArticleService.generateSectionStream(
         section,
         outline,
-        { provider: 'claude' },
+        { provider: 'gemini' },
         (chunk) => {
           fullContent += chunk;
           res.write(`data: ${JSON.stringify({ chunk, full: fullContent })}\n\n`);

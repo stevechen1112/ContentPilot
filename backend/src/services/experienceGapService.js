@@ -7,7 +7,7 @@ class ExperienceGapService {
    */
   static async detectExperienceGaps(article, options = {}) {
     try {
-      const { provider = 'ollama', target_keyword = '' } = options;
+      const { provider = 'gemini', target_keyword = '' } = options;
 
       // 提取段落
       const sections = this.extractSections(article);
@@ -157,7 +157,7 @@ ${targetKeyword}
    * 將使用者補充的經驗無縫融入原文
    */
   static async smartRewrite(originalContent, userExperience, options = {}) {
-    const { provider = 'ollama', section_heading = '' } = options;
+    const { provider = 'gemini', section_heading = '' } = options;
 
     const prompt = `你是一位專業的內容編輯，擅長將個人經驗自然地融入文章中。
 

@@ -1,136 +1,119 @@
-# SEO ContentForge (ContentPilot)
+# ContentPilot (SEO ContentForge)
 
 SEO 自動化內容生產系統 - 結合 AI 骨架與人類靈魂的高效寫作平台。
 
 ## 🚀 專案簡介
 
-ContentPilot 是一個協助內容創作者快速生產高品質 SEO 文章的工具。它利用 AI 自動生成 85 分的基礎內容，並提供智能介面引導使用者補充關鍵的「真實經驗」，最終產出符合 Google E-E-A-T 標準的優質文章。
+ContentPilot 是一個協助內容創作者快速生產高品質 SEO 文章的工具。它利用 **Google Gemini 2.0 Flash** 的強大能力自動生成 85 分的基礎內容，並提供智能介面引導使用者補充關鍵的「真實經驗」，最終產出符合 Google E-E-A-T 標準的優質文章。
+
+本系統已全面採用 **Gemini API** 作為核心 AI 引擎，移除了對本地 LLM (Ollama) 的依賴，大幅降低部署門檻並提升生成速度與品質。
 
 ## 🛠️ 技術架構
 
-- **Frontend**: React 19.2, TypeScript, Vite, Tailwind CSS, Zustand, React Query
-- **Backend**: Node.js, Express, JWT Authentication
-- **AI Service**: Anthropic Claude Sonnet 4.5, OpenAI GPT-4o, Ollama (Local LLM)
-- **Database**: PostgreSQL (關聯資料), MongoDB (文件資料), Redis (快取/佇列)
-- **Infrastructure**: Docker, Nginx
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
+- **Backend**: Node.js, Express
+- **AI Engine**: Google Gemini API (Gemini 2.0 Flash / Pro)
+- **Search Engine**: Serper.dev API (Google Search Results)
+- **Database**: PostgreSQL (主要資料), MongoDB (日誌/文件), Redis (快取)
 
-## 🔄 核心工作流程 (S1-S8)
+## ✨ 核心功能
 
-本系統採用模組化設計，模擬專業 SEO 團隊的運作流程：
+### 1. 主題驅動生成 (Topic-Driven Generation)
+- **關鍵字即主題**：直接輸入目標關鍵字（如「上背痛原因」），系統自動判讀意圖並生成對應文章。
+- **客製化設定**：支援設定「目標受眾」（如：一般大眾、專業人士）與「語氣」（如：專業親切、幽默風趣）。
 
-1.  **S1 內容策劃**: 專案與關鍵字管理，定義目標受眾。
-2.  **S2 深度閱讀 (Deep Reading)**: 
-    - **黑名單機制**: 排除維基百科等非原創來源，優先抓取商業網站、新聞媒體與部落格。
-    - **全文抓取**: 讀取來源網頁前 1500 字內文，而非僅依賴搜尋摘要，確保引用內容精準。
-3.  **S3 策略分析**: 分析競爭對手結構，找出內容缺口。
-4.  **S4 大綱生成**: AI 規劃最佳化文章結構 (H2/H3)。
-5.  **S5 雙重生成 (Two-Pass Generation)**: 
-    - **Pass 1 (Drafting)**: 結合深度閱讀資料，生成內容初稿。
-    - **Pass 2 (Deep Refinement)**: 啟動「嚴格主編」AI，進行去蕪存菁、結構修復與語氣潤飾。
-6.  **S6 結構強制 (Code-Level SEO)**: 由系統代碼強制插入 H2 標籤，不依賴 AI 生成，確保 100% 完美的 HTML 結構。
-7.  **S7 格式輸出**: 生成標準 HTML 格式，自動注入真實引用連結。
-8.  **S8 經驗缺口檢測**: 獨家功能，識別內容中缺乏「真實經驗」的段落，引導人工補強。
+### 2. 智能大綱與研究 (Smart Outline & Research)
+- **SERP 分析**：自動分析 Google 前幾名搜尋結果，提取熱門標題與結構。
+- **競爭對手分析**：深入分析競爭對手的文章結構 (H2/H3)，找出內容缺口。
+- **People Also Ask**：自動整合使用者常見問題，增加內容豐富度。
 
-## 🏆 SEO 品質標準
+### 3. 高品質文章寫作 (High-Quality Writing)
+- **Gemini 全面驅動**：從大綱規劃、引言撰寫到內文生成，全程使用 Gemini 模型，確保邏輯連貫與語意通順。
+- **E-E-A-T 優化**：內建權威來源檢索 (Librarian Service)，確保引用資料的可信度。
+- **自動引用**：文章中會自動標註參考來源，提升 SEO 權重。
 
-系統產出的內容嚴格遵循以下標準：
+### 4. 智能二修與經驗補強 (Smart Refinement)
+- **經驗缺口檢測 (Experience Gap Detection)**：AI 自動識別文章中缺乏「真實體驗」的段落。
+- **引導式補充**：系統提示使用者輸入個人經驗或案例。
+- **智能融合**：AI 將使用者的真實經驗無縫融入文章中，打造獨一無二的原創內容。
 
-- **Google E-E-A-T**:
-    - **Experience (經驗)**: 透過 S8 模組確保包含真實案例。
-    - **Expertise (專業)**: 引用權威來源 (.gov, .edu, 學術期刊) 與優質商業來源。
-    - **Authoritativeness (權威)**: 建立正確的知識圖譜，避免內容空洞。
-    - **Trustworthiness (信任)**: 嚴格的事實查核，所有引用連結皆經過預先驗證 (Pre-verified)。
-- **結構完美性**: 
-    - **H2/H3 層級**: 由代碼強制控制，杜絕標題斷裂或重複。
-    - **Scope Control**: 嚴格限制 AI 寫作範圍，防止段落間內容重複。
-- **原創性 (Originality)**: 確保內容非抄襲，通過相似度檢測。
-- **結構化數據**: 自動生成 H1-H3 標籤、Meta Description 與目錄。
+## 🔄 工作流程 (S1-S8)
 
-## ⚡ 快速開始（Windows）
+1.  **S1 內容策劃**: 設定關鍵字、受眾與語氣。
+2.  **S2 深度搜尋**: 透過 Serper API 獲取 SERP 資料與競爭對手資訊。
+3.  **S3 策略分析**: 分析搜尋意圖與內容缺口。
+4.  **S4 大綱生成**: Gemini 規劃最佳化文章結構。
+5.  **S5 全文生成**: 
+    - **Librarian**: 預先檢索權威來源。
+    - **Writing**: Gemini 逐段撰寫，確保內容深度。
+6.  **S6 結構優化**: 強制 HTML 結構 (H2/H3) 輸出。
+7.  **S7 格式輸出**: 生成標準 HTML，包含 Meta Description 與引用連結。
+8.  **S8 經驗補強**: 檢測並引導補充真實經驗。
 
-### 1. 一鍵啟動（推薦）
+## ⚡ 快速開始
 
-我們提供了自動化 PowerShell 腳本，讓您能一鍵啟動完整的開發環境。
+### 1. 環境準備
+- Node.js (v18+)
+- Google Gemini API Key
+- Serper.dev API Key
 
-```powershell
-# 1. 檢查環境狀態 (Node.js, Docker, Ports)
-.\check-env.ps1
+### 2. 安裝依賴
 
-# 2. 啟動所有服務 (Backend + Frontend)
-.\start-dev.ps1
-```
-
-啟動後，請開啟瀏覽器訪問：
-- **Frontend UI**: http://localhost:5173
-- **Backend API**: http://localhost:3000
-
-若要停止服務，請執行：
-```powershell
-.\stop-dev.ps1
-```
-
-### 2. 手動啟動
-
-如果您偏好手動控制每個服務：
-
-**步驟 1: 啟動資料庫**
 ```bash
-docker-compose up -d
-```
-
-**步驟 2: 啟動後端 (Port 3000)**
-```bash
+# 安裝後端依賴
 cd backend
 npm install
-node server.js
+
+# 安裝前端依賴
+cd ../frontend
+npm install
 ```
 
-**步驟 3: 啟動前端 (Port 5173)**
+### 3. 設定環境變數
+
+請參考 `.env.example` 建立 `.env` 檔案：
+
+**Backend (`backend/.env`)**:
+```env
+PORT=3000
+# AI Configuration
+GOOGLE_GEMINI_API_KEY=your_gemini_key
+GOOGLE_GEMINI_MODEL=gemini-2.0-flash-exp
+
+# Search Configuration
+SERPER_API_KEY=your_serper_key
+
+# Database (Optional for local dev if using mock)
+POSTGRES_HOST=localhost
+...
+```
+
+### 4. 啟動專案
+
+**啟動後端**:
 ```bash
-cd frontend
-npm install
+cd backend
+npm start
+# 或使用開發模式
 npm run dev
 ```
 
-## 📖 文件導航
-
-| 文件 | 說明 |
-|------|------|
-| [LOCAL_DEPLOYMENT.md](LOCAL_DEPLOYMENT.md) | 📦 完整本地部署與環境配置指南 |
-| [OLLAMA_INTEGRATION.md](OLLAMA_INTEGRATION.md) | 🦙 本地 LLM (Ollama) 整合說明 |
-| [backend/API_TESTING.md](backend/API_TESTING.md) | 🧪 API 測試與端點說明 |
-
-## 🧪 測試與驗證
-
-本專案包含完整的端到端測試腳本，用於驗證 SEO 生成流程。
-
-### 執行完整 E2E 測試
+**啟動前端**:
 ```bash
-cd backend
-node test-full-e2e.js
-```
-此測試將模擬真實用戶行為：
-1. 登入並創建專案
-2. 分析 SERP 資料
-3. 生成文章大綱與內容
-4. 執行 SEO 與 E-E-A-T 品質檢測
-5. 產出 `generated-article.html` 與 `test-report.json`
-
-## 📂 專案結構
-
-```
-ContentPilot/
-├── backend/        # Node.js 後端 API (Express)
-├── frontend/       # React 前端應用 (Vite)
-├── docs/           # 專案設計文件
-├── docker/         # Docker 配置
-├── check-env.ps1   # 環境檢查腳本
-├── start-dev.ps1   # 啟動腳本
-└── docker-compose.yml
+cd frontend
+npm run dev
 ```
 
-## 📝 開發狀態
+前端預設運行於 `http://localhost:5173`，後端 API 運行於 `http://localhost:3000`。
 
-- **後端核心**: ✅ 完成 (S1-S8 模組)
-- **AI 引擎**: ✅ 完成 (支援 Claude, OpenAI, Ollama)
-- **前端介面**: 🚧 開發中
+## 🧪 測試腳本
+
+專案包含多個測試腳本，位於 `backend/` 目錄下：
+
+- `node test-gemini-only.js`: 測試單篇 Gemini 文章生成流程。
+- `node batch-generate-articles.js`: 批量生成文章測試。
+- `node generate-real-article.js`: 生成真實完整的 HTML 文章檔案。
+
+## 📄 授權
+
+MIT License

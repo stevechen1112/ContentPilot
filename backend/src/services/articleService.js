@@ -10,7 +10,7 @@ class ArticleService {
   static async generateArticle(outline, options = {}) {
     try {
       const {
-        provider = 'ollama',
+        provider = 'gemini',
         style_guide = null,
         additional_context = null,
         serp_data = null
@@ -26,15 +26,11 @@ class ArticleService {
       console.log(`✅ [Librarian] 獲取 ${verifiedSources.length} 個驗證來源`);
 
       // 逐段生成文章
-      // 混合模式策略：引言與結論使用高智商模型 (Gemini)，內文使用高效率模型 (Ollama)
-      const isHybrid = provider === 'hybrid';
-      const brainModel = isHybrid ? 'gemini' : provider;
-      const workerModel = isHybrid ? 'ollama' : provider;
-
-      console.log(`🤖 模型策略: [引言/結論: ${brainModel}] [內文: ${workerModel}]`);
+      // 全面使用 Gemini 模型
+      console.log(`🤖 模型策略: 全面使用 ${provider}`);
 
       const introduction = await this.generateIntroduction(outline, { 
-        provider: brainModel, 
+        provider, 
         style_guide,
         serp_data,
         verifiedSources // 傳遞來源
@@ -43,7 +39,7 @@ class ArticleService {
       const sections = [];
       for (const section of outline.sections || []) {
         const sectionContent = await this.generateSection(section, outline, { 
-          provider: workerModel, 
+          provider, 
           style_guide,
           serp_data,
           verifiedSources // 傳遞來源
@@ -615,7 +611,7 @@ ${subsectionsText}
    * 改寫段落（人工補充經驗後重新融合）
    */
   static async rewriteSection(originalContent, userInput, options = {}) {
-    const { provider = 'ollama' } = options;
+    const { provider = 'gemini' } = options;
 
     const prompt = `你是一位專業的內容編輯。請將使用者提供的個人經驗，自然地融入到原始內容中。
 
@@ -805,7 +801,7 @@ ${userInput}
    * 品質檢查
    */
   static async qualityCheck(article, options = {}) {
-    const { provider = 'ollama', target_keyword } = options;
+    const { provider = 'gemini', target_keyword } = options;
 
     const prompt = `你是一位 SEO 內容品質審核專家。請檢查以下文章的品質。
 

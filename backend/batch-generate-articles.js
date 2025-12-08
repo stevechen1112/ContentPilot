@@ -45,14 +45,14 @@ async function generateBatch() {
         target_audience: '一般大眾',
         tone: '專業且實用',
         word_count: 2500,
-        provider: 'hybrid' // 使用混合模式：Gemini 生成大綱
+        provider: 'gemini' // 使用 Gemini 生成大綱
       });
       console.log('  ✅ 大綱生成完成');
 
       // 3. 生成文章 (S5)
       console.log('  ✍️ 正在撰寫全文 (這可能需要幾分鐘)...');
       const article = await ArticleService.generateArticle(outline, { 
-        provider: 'hybrid', // 使用混合模式：Gemini (引言/結論) + Ollama (內文)
+        provider: 'gemini', // 使用 Gemini
         style_guide: { tone: '專業且親切' },
         serp_data: serpData
       });
