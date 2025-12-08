@@ -1,0 +1,34 @@
+{
+  "sleep": [
+    {
+      "id": "source_1",
+      "title": "國人睡眠品質調查報告 - 台灣睡眠醫學學會",
+      "url": "https://www.tssm.org.tw/",
+      "snippet": "根據台灣睡眠醫學學會調查，全台約有 1/10 人口受慢性失眠所苦，高達 11.3% 的人需依賴安眠藥入睡。",
+      "credibility": 95
+    },
+    {
+      "id": "source_2",
+      "title": "失眠怎麼辦？ - 衛生福利部國民健康署",
+      "url": "https://www.hpa.gov.tw/Pages/Detail.aspx?nodeid=127&pid=1235",
+      "snippet": "長期失眠可能導致免疫力下降、心血管疾病風險增加。建議透過規律運動、避免睡前使用3C產品來改善。",
+      "credibility": 90
+    },
+    {
+      "id": "source_3",
+      "title": "睡眠衛生原則 - 台大醫院睡眠中心",
+      "url": "https://www.ntuh.gov.tw/sleep/衛教資訊.aspx",
+      "snippet": "良好的睡眠衛生包括：固定起床時間、臥室僅用於睡眠與性生活、避免午後攝取咖啡因。",
+      "credibility": 92
+    }
+  ],
+  "general_health": [
+    {
+      "id": "source_4",
+      "title": "健康九九網站 - 衛生福利部",
+      "url": "https://health99.hpa.gov.tw/",
+      "snippet": "提供全方位的健康衛教資訊，包含飲食、運動、慢性病防治等。",
+      "credibility": 88
+    }
+  ]
+}

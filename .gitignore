@@ -1,0 +1,178 @@
+# ContentPilot AI - Git Ignore 設定
+
+# ================================
+# 環境變數與機密資訊
+# ================================
+.env
+.env.local
+.env.production
+.env.staging
+.env.*.local
+api key.md
+*.md.backup
+
+# ================================
+# Node.js
+# ================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Build 輸出
+dist/
+dist-ssr/
+build/
+*.local
+
+# ================================
+# Python
+# ================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ================================
+# 資料庫
+# ================================
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.sql
+
+# PostgreSQL
+*.dump
+*.backup
+
+# MongoDB
+*.bson
+
+# ================================
+# 上傳與暫存檔案
+# ================================
+uploads/
+temp/
+backups/
+*.tmp
+*.cache
+
+# 圖片暫存
+*.jpg~
+*.png~
+*.webp~
+
+# ================================
+# IDE / 編輯器
+# ================================
+
+# VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# ================================
+# 作業系統
+# ================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ================================
+# 測試與覆蓋率
+# ================================
+coverage/
+*.coverage
+.nyc_output/
+.jest/
+test-results/
+junit.xml
+
+# ================================
+# Docker
+# ================================
+docker-compose.override.yml
+.dockerignore
+
+# ================================
+# 日誌
+# ================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# ================================
+# 快取
+# ================================
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+.turbo/
+
+# ================================
+# 其他
+# ================================
+.env.backup
+*.pem
+*.key
+*.cert
+*.crt
+
+# Sitemap
+sitemap.xml
+sitemap.xml.gz
+
+# 備份檔案
+*.bak
+*.backup
+*.old

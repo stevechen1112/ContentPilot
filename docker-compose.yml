@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - 關聯式資料庫 (使用者、專案、文章元資料)
+  postgres:
+    image: postgres:15-alpine
+    container_name: contentpilot-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: contentpilot_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - contentpilot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MongoDB - 文件資料庫 (文章草稿、風格知識庫)
+  mongo:
+    image: mongo:6.0
+    container_name: contentpilot-mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - contentpilot-network
+
+  # Redis - 快取與任務佇列
+  redis:
+    image: redis:7-alpine
+    container_name: contentpilot-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - contentpilot-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+
+networks:
+  contentpilot-network:
+    driver: bridge
