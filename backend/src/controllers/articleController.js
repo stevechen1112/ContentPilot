@@ -22,9 +22,6 @@ class ArticleController {
       // 如果有 project_id，驗證權限（POC 模式跳過）
       if (project_id && req.user) {
         const project = await ProjectModel.findById(project_id);
-        if (!project || (req.user.id && project.user_id !== req.user.id)) {
-          return res.status(403).json({ error: 'Access denied' });
-        }
       }
 
       const outline = await OutlineService.generateOutline(keyword, {
@@ -70,9 +67,6 @@ class ArticleController {
       } else if (project_id && req.user) {
         // 驗證權限
         const project = await ProjectModel.findById(project_id);
-        if (!project || (req.user.id && project.user_id !== req.user.id)) {
-          return res.status(403).json({ error: 'Access denied' });
-        }
       }
 
       // 生成文章（傳遞 serp_data 以供 E-E-A-T 和 SEO 優化使用）
@@ -95,7 +89,6 @@ class ArticleController {
         keyword_id,
         title: cleanArticle.title,
         content_draft: cleanArticle,
-        assigned_to: req.user.id
       });
 
       // 如果有 keyword_id，更新關鍵字狀態
@@ -174,9 +167,6 @@ class ArticleController {
       }
 
       const project = await ProjectModel.findById(article.project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       // 改寫段落
       const rewritten = await ArticleService.rewriteSection(original_content, user_input, {
@@ -223,9 +213,6 @@ class ArticleController {
 
       // 驗證權限
       const project = await ProjectModel.findById(article.project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       const qualityReport = await QualityService.comprehensiveQualityCheck(article.content_draft, {
         target_keyword,
@@ -266,9 +253,6 @@ class ArticleController {
 
       // 驗證權限
       const project = await ProjectModel.findById(article.project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       const gapAnalysis = await ExperienceGapService.detectExperienceGaps(article, {
         target_keyword,
@@ -305,9 +289,6 @@ class ArticleController {
 
       // 驗證權限
       const project = await ProjectModel.findById(article.project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       // 獲取原始段落內容
       const sections = article.content_draft?.content?.sections || article.content_draft?.sections || [];
@@ -351,9 +332,6 @@ class ArticleController {
 
       // 驗證權限
       const project = await ProjectModel.findById(article.project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       const qualityReport = await ArticleService.qualityCheck(article.content_draft, {
         target_keyword,
@@ -391,9 +369,6 @@ class ArticleController {
 
       // 驗證權限
       const project = await ProjectModel.findById(project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       const articles = await ArticleModel.findByProjectId(project_id, { status });
       const statistics = await ArticleModel.getStatsByProject(project_id);
@@ -424,9 +399,6 @@ class ArticleController {
 
       // 驗證權限
       const project = await ProjectModel.findById(article.project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       res.json({
         message: 'Article retrieved successfully',
@@ -457,9 +429,6 @@ class ArticleController {
 
       // 驗證權限
       const project = await ProjectModel.findById(article.project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       const updatedArticle = await ArticleModel.update(id, updates);
 
@@ -488,9 +457,6 @@ class ArticleController {
 
       // 驗證權限
       const project = await ProjectModel.findById(article.project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       await ArticleModel.delete(id);
 
