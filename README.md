@@ -2,20 +2,45 @@
 
 Google 風格的極簡文章生成工具 - 輸入關鍵字，自動生成完整 SEO 優化文章。
 
+## 🌐 線上 Demo
+
+**正式環境**: [http://172.238.31.80](http://172.238.31.80)
+
+- **Demo 模式**：無需登入即可使用所有功能
+- **自動認證**：系統自動使用 demo-user 身份
+- **完整體驗**：包含文章生成、查看、管理等所有功能
+
 ## 🚀 快速開始
 
 ### 前置需求
 - Node.js 18+
 - PostgreSQL (透過 Docker)
 
-### 安裝步驟
+### 本地開發安裝步驟
 
 1. **啟動資料庫**
    ```bash
    docker-compose up -d
    ```
 
-2. **啟動後端**
+2. **初始化資料庫**
+   ```bash
+   # 連接到 PostgreSQL 容器
+   docker exec -i contentpilot-postgres psql -U postgres -d contentpilot_dev < backend/schema.sql
+   ```
+
+3. **配置環境變數**
+   ```bash
+   # 後端環境變數
+   cp backend/.env.example backend/.env
+   # 編輯 backend/.env，填入 API Keys
+   
+   # 前端環境變數
+   cp frontend/.env.example frontend/.env
+   # 設定 VITE_API_URL=http://localhost:3000/api
+   ```
+
+4. **啟動後端**
    ```bash
    cd backend
    npm install
@@ -23,7 +48,7 @@ Google 風格的極簡文章生成工具 - 輸入關鍵字，自動生成完整 
    ```
    後端運行於 `http://localhost:3000`
 
-3. **啟動前端**
+5. **啟動前端**
    ```bash
    cd frontend
    npm install
@@ -31,7 +56,7 @@ Google 風格的極簡文章生成工具 - 輸入關鍵字，自動生成完整 
    ```
    前端運行於 `http://localhost:5173`
 
-4. **開始使用**
+6. **開始使用**
    - 打開瀏覽器訪問 `http://localhost:5173`
    - 輸入關鍵字（例如：日本旅遊、健康飲食）
    - 點擊生成按鈕
@@ -208,6 +233,191 @@ npm run dev
 - `node test-gemini-only.js`: 測試單篇 Gemini 文章生成流程。
 - `node batch-generate-articles.js`: 批量生成文章測試。
 - `node generate-real-article.js`: 生成真實完整的 HTML 文章檔案。
+
+## 🚀 生產環境部署
+
+### 系統架構
+- **伺服器**: Linode Ubuntu (172.238.31.80)
+- **前端**: React + Vite (port 5173) - PM2 管理
+- **後端**: Node.js + Express (port 3000) - PM2 管理
+- **資料庫**: Docker Compose
+  - PostgreSQL (port 5433)
+  - MongoDB (port 27017)
+  - Redis (port 6379)
+- **Web 伺服器**: Nginx 反向代理
+
+### 部署步驟
+
+1. **安裝依賴**
+   ```bash
+   # 安裝 Node.js 20
+   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+   sudo apt-get install -y nodejs
+   
+   # 安裝 PM2
+   sudo npm install -g pm2
+   
+   # 安裝 Docker
+   curl -fsSL https://get.docker.com -o get-docker.sh
+   sudo sh get-docker.sh
+   ```
+
+2. **Clone 專案**
+   ```bash
+   cd /opt
+   git clone https://github.com/stevechen1112/ContentPilot.git
+   cd ContentPilot
+   ```
+
+3. **啟動資料庫**
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **初始化資料庫**
+   ```bash
+   docker exec -i contentpilot-postgres psql -U postgres -d contentpilot_dev < backend/schema.sql
+   ```
+
+5. **配置環境變數**
+   ```bash
+   # 後端 .env
+   cd /opt/ContentPilot/backend
+   nano .env
+   ```
+   
+   設定內容：
+   ```env
+   PORT=3000
+   NODE_ENV=production
+   
+   # AI Provider
+   AI_PROVIDER=gemini
+   GOOGLE_GEMINI_API_KEY=你的金鑰
+   GOOGLE_GEMINI_MODEL=gemini-2.0-flash-exp
+   
+   # Database
+   DATABASE_URL=postgresql://postgres:postgres@localhost:5433/contentpilot_dev
+   POSTGRES_HOST=localhost
+   POSTGRES_PORT=5433
+   POSTGRES_DB=contentpilot_dev
+   POSTGRES_USER=postgres
+   POSTGRES_PASSWORD=postgres
+   
+   # APIs
+   SERPER_API_KEY=你的金鑰
+   ```
+   
+   前端 .env：
+   ```bash
+   cd /opt/ContentPilot/frontend
+   nano .env
+   ```
+   
+   設定內容：
+   ```env
+   VITE_API_URL=http://172.238.31.80/api
+   ```
+
+6. **啟動後端 (PM2)**
+   ```bash
+   cd /opt/ContentPilot/backend
+   npm install --production
+   pm2 start npm --name "contentpilot-backend" -- run start
+   ```
+
+7. **啟動前端 (PM2)**
+   ```bash
+   cd /opt/ContentPilot/frontend
+   npm install
+   pm2 start npm --name "contentpilot-frontend" -- run dev -- --host
+   ```
+
+8. **配置 Nginx**
+   ```bash
+   sudo nano /etc/nginx/sites-available/contentpilot
+   ```
+   
+   配置內容：
+   ```nginx
+   server {
+       listen 80;
+       server_name 172.238.31.80;
+
+       # 前端
+       location / {
+           proxy_pass http://127.0.0.1:5173;
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection 'upgrade';
+           proxy_set_header Host $host;
+           proxy_cache_bypass $http_upgrade;
+       }
+
+       # 後端 API (延長 timeout 以支援 AI 生成)
+       location /api/ {
+           proxy_pass http://127.0.0.1:3000;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_read_timeout 600s;
+           proxy_connect_timeout 600s;
+           proxy_send_timeout 600s;
+       }
+   }
+   ```
+   
+   啟用配置：
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/contentpilot /etc/nginx/sites-enabled/
+   sudo nginx -t
+   sudo systemctl restart nginx
+   ```
+
+9. **設定 PM2 開機啟動**
+   ```bash
+   pm2 save
+   pm2 startup
+   ```
+
+### PM2 管理指令
+
+```bash
+# 查看狀態
+pm2 status
+
+# 查看日誌
+pm2 logs contentpilot-backend
+pm2 logs contentpilot-frontend
+
+# 重啟服務
+pm2 restart contentpilot-backend
+pm2 restart contentpilot-frontend
+
+# 停止服務
+pm2 stop contentpilot-backend
+pm2 stop contentpilot-frontend
+```
+
+### Demo 模式說明
+
+目前系統運行在 **Demo 模式**，特點如下：
+
+- **無需登入**：所有 API 請求自動使用 `demo-user` 身份
+- **無權限檢查**：所有使用者可存取所有專案和文章
+- **快速體驗**：適合展示和測試系統功能
+
+認證中介層 (`backend/src/middleware/auth.js`) 已配置為自動返回 demo 使用者：
+```javascript
+// 所有請求自動認證為 demo-user
+req.user = {
+  id: 'demo-user',
+  email: 'admin@example.com'
+};
+```
+
+**轉換為正式環境**：若需啟用完整的使用者註冊/登入系統，需重新實作 JWT 驗證邏輯。
 
 ## 📄 授權
 
