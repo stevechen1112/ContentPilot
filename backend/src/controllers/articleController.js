@@ -55,18 +55,15 @@ class ArticleController {
       }
 
       // POC 模式：如果沒有 project_id，自動建立一個預設專案
-      if (!project_id && req.user) {
+      if (!project_id) {
         const defaultProject = await ProjectModel.create({
           name: '快速生成',
           description: 'Auto-created for quick generation',
-          user_id: req.user.id,
+          user_id: 'demo-user',
           niche: 'general',
           target_audience: target_audience || '一般讀者'
         });
         project_id = defaultProject.id;
-      } else if (project_id && req.user) {
-        // 驗證權限
-        const project = await ProjectModel.findById(project_id);
       }
 
       // 生成文章（傳遞 serp_data 以供 E-E-A-T 和 SEO 優化使用）
