@@ -4,11 +4,11 @@ class ArticleModel {
   /**
    * 建立新文章
    */
-  static async create({ project_id, keyword_id, title, content_draft, assigned_to }) {
+  static async create({ project_id, keyword_id, title, content_draft }) {
     const result = await pgPool.query(
-      `INSERT INTO articles (project_id, keyword_id, title, content_draft, assigned_to, status)
-       VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING *`,
-      [project_id, keyword_id, title, content_draft, assigned_to]
+      `INSERT INTO articles (project_id, keyword_id, title, content_draft, status)
+       VALUES ($1, $2, $3, $4, 'draft') RETURNING *`,
+      [project_id, keyword_id, title, content_draft]
     );
     return result.rows[0];
   }
@@ -28,7 +28,7 @@ class ArticleModel {
    * 查詢專案的所有文章
    */
   static async findByProjectId(project_id, filters = {}) {
-    let query = 'SELECT a.*, k.keyword, u.name as author_name FROM articles a LEFT JOIN keywords k ON a.keyword_id = k.id LEFT JOIN users u ON a.assigned_to = u.id WHERE a.project_id = $1';
+    let query = 'SELECT a.*, k.keyword FROM articles a LEFT JOIN keywords k ON a.keyword_id = k.id WHERE a.project_id = $1';
     const params = [project_id];
     let paramCount = 2;
 
