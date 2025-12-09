@@ -13,16 +13,16 @@ class ArticleController {
    */
   static async generateOutline(req, res) {
     try {
-      const { keyword, project_id, serp_data, tone, target_audience } = req.body;
+      const { keyword, project_id, serp_data, tone, target_audience, author_bio, author_values } = req.body;
 
       if (!keyword) {
         return res.status(400).json({ error: 'Keyword is required' });
       }
 
-      // 如果有 project_id，驗證權限
-      if (project_id) {
+      // 如果有 project_id，驗證權限（POC 模式跳過）
+      if (project_id && req.user) {
         const project = await ProjectModel.findById(project_id);
-        if (!project || project.user_id !== req.user.id) {
+        if (!project || (req.user.id && project.user_id !== req.user.id)) {
           return res.status(403).json({ error: 'Access denied' });
         }
       }
@@ -30,7 +30,9 @@ class ArticleController {
       const outline = await OutlineService.generateOutline(keyword, {
         serp_data,
         tone,
-        target_audience
+        target_audience,
+        author_bio,
+        author_values
       });
 
       res.json({
@@ -49,31 +51,50 @@ class ArticleController {
    */
   static async generateArticle(req, res) {
     try {
-      const { project_id, keyword_id, outline, serp_data, tone, target_audience } = req.body;
+      let { project_id, keyword_id, outline, serp_data, tone, target_audience, author_bio, author_values } = req.body;
 
-      if (!project_id || !outline) {
-        return res.status(400).json({ error: 'Project ID and outline are required' });
+      if (!outline) {
+        return res.status(400).json({ error: 'Outline is required' });
       }
 
-      // 驗證權限
-      const project = await ProjectModel.findById(project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
+      // POC 模式：如果沒有 project_id，自動建立一個預設專案
+      if (!project_id && req.user) {
+        const defaultProject = await ProjectModel.create({
+          name: '快速生成',
+          description: 'Auto-created for quick generation',
+          user_id: req.user.id,
+          niche: 'general',
+          target_audience: target_audience || '一般讀者'
+        });
+        project_id = defaultProject.id;
+      } else if (project_id && req.user) {
+        // 驗證權限
+        const project = await ProjectModel.findById(project_id);
+        if (!project || (req.user.id && project.user_id !== req.user.id)) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
       }
 
       // 生成文章（傳遞 serp_data 以供 E-E-A-T 和 SEO 優化使用）
       const article = await ArticleService.generateArticle(outline, {
         serp_data,
         style_guide: tone ? { tone } : undefined,
-        target_audience
+        target_audience,
+        author_bio,
+        author_values
       });
+
+      // 清理 PostgreSQL 不支援的 null 字符 (\u0000)
+      const cleanArticle = JSON.parse(
+        JSON.stringify(article).replace(/\\u0000/g, '')
+      );
 
       // 儲存到資料庫
       const savedArticle = await ArticleModel.create({
         project_id,
         keyword_id,
-        title: article.title,
-        content_draft: article,
+        title: cleanArticle.title,
+        content_draft: cleanArticle,
         assigned_to: req.user.id
       });
 

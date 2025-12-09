@@ -13,7 +13,9 @@ class ArticleService {
         provider = 'gemini',
         style_guide = null,
         additional_context = null,
-        serp_data = null
+        serp_data = null,
+        author_bio,
+        author_values
       } = options;
 
       console.log('📝 開始生成文章...');
@@ -33,7 +35,9 @@ class ArticleService {
         provider, 
         style_guide,
         serp_data,
-        verifiedSources // 傳遞來源
+        verifiedSources, // 傳遞來源
+        author_bio,
+        author_values
       });
 
       const sections = [];
@@ -42,7 +46,9 @@ class ArticleService {
           provider, 
           style_guide,
           serp_data,
-          verifiedSources // 傳遞來源
+          verifiedSources, // 傳遞來源
+          author_bio,
+          author_values
         });
         sections.push(sectionContent);
 
@@ -51,9 +57,11 @@ class ArticleService {
       }
 
       const conclusion = await this.generateConclusion(outline, sections, { 
-        provider: brainModel, 
+        provider, 
         style_guide,
-        verifiedSources // 傳遞來源
+        verifiedSources, // 傳遞來源
+        author_bio,
+        author_values
       });
 
       // 保障標題與 meta 有值，避免 undefined 注入到 HTML
@@ -179,7 +187,7 @@ class ArticleService {
    * 生成引言段落
    */
   static async generateIntroduction(outline, options = {}) {
-    const { provider, style_guide, serp_data, verifiedSources: passedSources } = options;
+    const { provider, style_guide, serp_data, verifiedSources: passedSources, author_bio, author_values } = options;
 
     console.log('🔍 [Librarian] 正在檢索權威來源...');
     
@@ -214,6 +222,11 @@ ${userQuestions ? `- ${userQuestions}` : '無數據'}
 ## 📚 參考文獻庫 (Reference Library)
 ${formattedSources}
 
+## 👤 作者 Persona 與價值觀 (重要！)
+${author_bio ? `- 作者背景: ${author_bio}` : ''}
+${author_values ? `- 核心價值觀: ${author_values}` : ''}
+請務必將上述作者的觀點與風格融入寫作中，確保內容具有獨特性與個人色彩。
+
 ## 寫作要求
 1. **專業但誠實**：使用第三人稱或客觀描述，避免虛構個人經驗。
 2. **痛點共鳴**：開場直接切入讀者痛點，使用客觀事實和研究數據。
@@ -234,25 +247,27 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
    - ❌ 忽略引用：內容農場、個人部落格、論壇討論、品質低劣的網站。
    - 如果某個來源雖然在列表中，但你判斷其內容不可信或不專業，請**不要引用**。
 
-2. **引用標記**：當你引用某個觀點或數據時，請在句尾加上來源編號，例如：
-   - "根據研究顯示，長期失眠會增加心血管疾病風險 [1]。"
-   - "專家建議睡前應避免使用 3C 產品 [2]。"
+2. **引用方式**：當你引用某個觀點或數據時，請使用自然的表達方式，例如：
+   - "根據研究顯示，長期失眠會增加心血管疾病風險。"
+   - "專家建議睡前應避免使用 3C 產品。"
+   - "根據醫學研究，適度運動有助於改善睡眠品質。"
 
 3. **禁止事項**：
    ❌ 不要寫出完整的 URL (例如 https://...)
    ❌ 不要寫 <a href="..."> 標籤 (系統會自動處理)
+   ❌ 不要寫引用標記如 [1], [2], [3] 等
    ❌ 不要引用參考文獻庫以外的來源
 
-4. **引用數量**：
-   - 如果「參考文獻庫」中有相關且高品質的來源，請引用 1-2 個。
-   - **如果「參考文獻庫」為空或無相關來源，請不要強行引用，也不要編造 [1] 標記。**
+4. **引用原則**：
+   - 參考「參考文獻庫」中的資訊，但以自然方式融入內容。
+   - **如果「參考文獻庫」為空或無相關來源，請依據專業知識撰寫。**
    - 寧可不引用，也不要引用錯誤或無關的來源。
 
 ## 輸出格式
 - 使用 HTML 格式
 - **不要**在開頭生成 <h2> 標題（系統會自動處理）
 - 直接以 <p> 段落開始撰寫引言內容
-- **不要**在輸出中包含 "參考文獻" 列表，只需在文中標註 [1], [2] 即可。
+- **不要**在輸出中包含 "參考文獻" 列表或任何引用標記。
 - 直接輸出 HTML，無需其他說明
 
 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容。`;
@@ -276,10 +291,16 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
    * 生成單一段落
    */
   static async generateSection(section, outline, options = {}) {
-    const { provider, style_guide, serp_data, internal_links, verifiedSources: passedSources } = options;
+    const { provider, style_guide, serp_data, internal_links, verifiedSources: passedSources, author_bio, author_values } = options;
 
+    // 🔧 兼容性處理：支援 title 或 heading
+    const sectionHeading = section.heading || section.title || '未命名段落';
     const subsectionsText = section.subsections
-      ? section.subsections.map(sub => `### ${sub.heading}\n${sub.description}`).join('\n\n')
+      ? section.subsections.map(sub => {
+          const subHeading = sub.heading || sub.title || sub;
+          const subDescription = sub.description || '';
+          return typeof sub === 'string' ? `### ${sub}` : `### ${subHeading}\n${subDescription}`;
+        }).join('\n\n')
       : '';
 
     // 🆕 動態搜尋該段落主題的權威來源
@@ -299,16 +320,21 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
     // 內部連結建議
     const internalLinksText = internal_links?.slice(0, 3).map(link => `- ${link.anchor_text} -> ${link.url}`).join('\n') || '';
 
-    const prompt = `你是一位擁有 10 年以上經驗的領域專家與 SEO 內容寫手。請根據以下要求，撰寫文章的段落內容。
+    const prompt = `你是一位擁有 10 年以上經驗的領域專家與 SEO 內容寫手${author_bio ? `，你的身分是：${author_bio}` : ''}。請根據以下要求，撰寫文章的段落內容。
 
 ## 段落標題（H2）
-${section.heading}
+${sectionHeading}
 
+${author_values ? `## 👤 作者價值觀（必須反映在內容中）
+${author_values}
+- 每個論點、建議都要符合此價值觀，否則請刪除或改寫。
+` : ''}
 ## 要寫的重點
 ${section.key_points?.join('\n- ') || ''}
 
-## 子段落結構
+## 子段落結構（必須使用 H3）
 ${subsectionsText}
+**重要**：每個子主題必須用 <h3> 標籤標示，形成清晰層級（H2 > H3 > 段落）。
 
 ## 目標字數
 約 ${section.estimated_words || 300} 字
@@ -317,6 +343,10 @@ ${subsectionsText}
 主要：${outline.keywords?.primary || ''}
 次要：${outline.keywords?.secondary?.join(', ') || ''}
 LSI：${outline.keywords?.lsi?.join(', ') || ''}
+
+**關鍵字使用策略**：
+- 主關鍵字「${outline.keywords?.primary}」在本段落自然出現 0-1 次（不強求，視語境）。
+- 次要關鍵字與 LSI 詞自然融入，不刻意堆砌。
 
 ## 🔍 競爭對手內容分析
 **高頻關鍵詞**：${topKeywords || '無數據'}
@@ -330,6 +360,20 @@ ${formattedSources}
 ## 🔗 內部連結建議（如有）
 ${internalLinksText || '無可用內部連結'}
 
+## 👤 作者 Persona 與價值觀 (重要！)
+${author_bio ? `- 作者背景: ${author_bio}` : ''}
+${author_values ? `- 核心價值觀: ${author_values}` : ''}
+請務必將上述作者的觀點與風格融入寫作中，確保內容具有獨特性與個人色彩。
+
+## ✍️ 寫作風格約束（避免 AI 常見問題）
+1. **可讀性優先**：
+   - 每段 3-4 句話，每句 15-25 字。
+   - 避免長複句，讓國中生也能輕鬆理解。
+   - 多用「你可以」「建議」「步驟」等行動導向詞。
+2. **禁用 AI 慣用詞**：避免「深入探討」「全面解析」「不容忽視」「至關重要」「值得注意的是」等填充詞。
+3. **具體化**：用數據、案例、步驟、比喻取代抽象描述。例如：「風險很高」→「損失可能超過本金 30%」。
+4. **口吻自然**：像對朋友說話，不要像教科書或官方文件。
+
 ## 寫作要求
 1. **⛔ 範圍嚴格限制 (Scope Control)**：
    - **你現在只負責撰寫「${section.heading}」這個段落。**
@@ -340,7 +384,8 @@ ${internalLinksText || '無可用內部連結'}
 2. **⛔ 格式嚴格限制 (Structure Control)**：
    - ❌ **不要** 在開頭重複寫出章節標題「${section.heading}」（系統會自動添加 H2）。
    - 直接以 H3 子標題或內文段落開始。
-   - 確保內容層級為 H3 -> H4，不要使用 H1 或 H2。
+   - 必須使用 <h3> 標籤標示子主題，形成 H2 > H3 > 段落的清晰層級。
+   - **禁止**使用 H1 或 H2 標題。
 
 3. **拒絕空話 (No Fluff)**：
    - ❌ 禁止：「選擇適合的工具很重要」、「這需要仔細考量」等廢話。
@@ -372,19 +417,21 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
    - ❌ 忽略引用：內容農場、個人部落格、論壇討論、品質低劣的網站。
    - 如果某個來源雖然在列表中，但你判斷其內容不可信或不專業，請**不要引用**。
 
-2. **引用標記**：當你引用某個觀點或數據時，請在句尾加上來源編號，例如：
-   - "根據研究顯示，長期失眠會增加心血管疾病風險 [1]。"
-   - "專家建議睡前應避免使用 3C 產品 [2]。"
+2. **引用方式**：當你引用某個觀點或數據時，請使用自然的表達方式，例如：
+   - "根據研究顯示，長期失眠會增加心血管疾病風險。"
+   - "專家建議睡前應避免使用 3C 產品。"
+   - "根據醫學研究，適度運動有助於改善睡眠品質。"
 
 3. **禁止事項**：
    ❌ 不要寫出完整的 URL (例如 https://...)
    ❌ 不要寫 <a href="..."> 標籤 (系統會自動處理)
+   ❌ 不要寫引用標記如 [1], [2], [3] 等
    ❌ 不要引用參考文獻庫以外的來源
    ❌ 不要使用 < > 符號來強調文字（如 <重點>），這會破壞 HTML 結構。請改用 **粗體** 或 「引號」。
 
-4. **引用數量**：
-   - 如果「參考文獻庫」中有相關且高品質的來源，請引用 1-2 個。
-   - **如果「參考文獻庫」為空或無相關來源，請不要強行引用，也不要編造 [1] 標記。**
+4. **引用原則**：
+   - 參考「參考文獻庫」中的資訊，但以自然方式融入內容。
+   - **如果「參考文獻庫」為空或無相關來源，請依據專業知識撰寫。**
    - 寧可不引用，也不要引用錯誤或無關的來源。
 
 ### 👤 Experience (經驗) - 關鍵加分項
@@ -416,32 +463,50 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 直接輸出 HTML 內容，不要有其他說明。
 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容。`;
 
+    // 動態調整 max_tokens 根據 estimated_words
+    const targetWords = section.estimated_words || 350;
+    const maxTokens = Math.min(Math.ceil(targetWords * 2), 2000); // 字數*2 轉為 tokens，最多2000
+
     const result = await AIService.generate(prompt, {
       provider,
       temperature: 0.6,
-      max_tokens: 2000
+      max_tokens: maxTokens
     });
+
+    // 🔍 調試：查看 OpenAI 原始返回
+    console.log(`  🔍 API 返回長度: ${result.content?.length || 0} 字符`);
+    if (!result.content || result.content.trim().length === 0) {
+      console.error(`  ❌ OpenAI 沒有返回內容！Prompt:\n${prompt.substring(0, 500)}...`);
+    }
 
     // 🔧 清理 Markdown 標記並移除 AI 可能生成的重複 h2 標題
     let cleanedHtml = this.cleanMarkdownArtifacts(result.content);
+    
+    // 🔍 調試：檢查初稿長度
+    const draftLength = (cleanedHtml.match(/[\u4e00-\u9fa5]/g) || []).length;
+    console.log(`  📊 清理後字數: ${draftLength} 字`);
     
     // 移除開頭的 <h2>標題</h2>（可能與 section.heading 重複）
     const h2Pattern = /^<h2[^>]*>.*?<\/h2>\s*/i;
     if (h2Pattern.test(cleanedHtml)) {
       cleanedHtml = cleanedHtml.replace(h2Pattern, '');
-      console.log(`  ℹ️ 已移除段落「${section.heading}」的重複 h2 標題`);
+      console.log(`  ℹ️ 已移除段落「${sectionHeading}」的重複 h2 標題`);
     }
 
     // 🌟 Quality Assurance Loop (Two-Pass Generation)
     // 用戶明確表示願意犧牲速度換取品質，因此我們增加「自我審查與修潤」步驟
-    console.log(`  ✨ 正在進行深度修潤 (Deep Refinement) - ${section.heading}...`);
-    cleanedHtml = await this.refineSection(cleanedHtml, section, outline, options);
+    if (draftLength > 0) {
+      console.log(`  ✨ 正在進行深度修潤 (Deep Refinement) - ${sectionHeading}...`);
+      cleanedHtml = await this.refineSection(cleanedHtml, section, outline, options);
+    } else {
+      console.warn(`  ⚠️ 初稿為空，跳過修潤步驟`);
+    }
 
     // 🆕 Post-processing: 將 [1] 標記轉換為真實連結
     cleanedHtml = LibrarianService.injectCitations(cleanedHtml, verifiedSources);
 
     return {
-      heading: section.heading,
+      heading: sectionHeading,
       html: cleanedHtml,
       plain_text: this.stripHtml(cleanedHtml)
     };
@@ -452,18 +517,47 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
    * 讓 AI 擔任「嚴格編輯」，檢查並優化初稿
    */
   static async refineSection(draftHtml, section, outline, options) {
-    const { provider, style_guide } = options;
+    const { provider, style_guide, author_bio, author_values } = options;
     
-    const prompt = `你是一位極度嚴格的資深主編。請審核並重寫以下文章段落（初稿）。
+    const prompt = `你是一位極度嚴格的資深主編 (Editor-in-Chief)。請審核並重寫以下文章段落（初稿）。
 
 ## 你的任務
 1. **消除重複**：檢查是否有重複的語句或鬼打牆的論述，將其精簡。
-2. **事實查核**：確保所有數據引用都有 [x] 標記，且語氣客觀。
+2. **事實查核**：
+   - 確保所有數據引用都有 [x] 標記，且語氣客觀。
+   - 如果出現沒有對應來源的 [x] 標記，立即刪除。
 3. **結構修正**：
    - 確保**沒有** H1 或 H2 標題（最高層級只能是 H3）。
+   - 確保每個子主題都有 <h3> 標籤，形成清晰層級。
    - 確保沒有「引言」或「結語」類型的廢話，直接切入重點。
 4. **SEO 優化**：確保關鍵字「${outline.keywords?.primary}」自然出現，但不要堆砌。
-5. **語氣潤飾**：${style_guide?.tone || '專業、權威且易讀'}。
+5. **可讀性強化**：
+   - 每段 3-4 句，每句 15-25 字。
+   - 刪除 AI 慣用詞（如「深入探討」「不容忽視」「值得注意的是」）。
+   - 將抽象描述改為具體案例或數據。
+   - 確保國中生也能看懂。
+6. **語氣潤飾**：${style_guide?.tone || '專業、權威且易讀'}，口吻自然像對朋友說話。
+
+## 👤 作者 Persona 與價值觀一致性檢查 (重要！)
+${author_bio ? `- 作者背景: ${author_bio}` : ''}
+${author_values ? `- 核心價值觀: ${author_values}` : ''}
+請檢查初稿是否符合上述作者的風格與價值觀。如果不符合，請進行大幅度改寫，使其聽起來像是這位作者親筆撰寫的。
+例如：
+- 如果作者強調「長期投資」，請刪除任何鼓勵「短線投機」的建議。
+- 如果作者重視「人性化管理」，請將冷冰冰的制度建議改為溫暖的溝通技巧。
+   - 每段 3-4 句，每句 15-25 字。
+   - 刪除 AI 慣用詞（如「深入探討」「不容忽視」「值得注意的是」）。
+   - 將抽象描述改為具體案例或數據。
+   - 確保國中生也能看懂。
+6. **語氣潤飾**：${style_guide?.tone || '專業、權威且易讀'}，口吻自然像對朋友說話。
+
+## 👤 作者 Persona 與價值觀一致性檢查 (重要！)
+${author_bio ? `- 作者背景: ${author_bio}` : ''}
+${author_values ? `- 核心價值觀: ${author_values}` : ''}
+請檢查初稿是否符合上述作者的風格與價值觀。如果不符合，請進行大幅度改寫，使其聽起來像是這位作者親筆撰寫的。
+例如：
+- 如果作者強調「長期投資」，請刪除任何鼓勵「短線投機」的建議。
+- 如果作者重視「人性化管理」，請將冷冰冰的制度建議改為溫暖的溝通技巧。
 
 ## 原始初稿
 ${draftHtml}
@@ -471,14 +565,19 @@ ${draftHtml}
 ## 輸出要求
 - 直接輸出修潤後的 HTML。
 - 保持 HTML 標籤結構（<p>, <ul>, <h3>）。
+- **禁止**生成 H2 標題或完整 URL。
 - 不要解釋你改了什麼，直接給出最終成品。
 - 務必使用台灣繁體中文。`;
 
     try {
+      // 動態調整 max_tokens（修潤時略微增加空間，但仍受限）
+      const originalLength = (draftHtml.match(/[\u4e00-\u9fa5]/g) || []).length;
+      const maxTokens = Math.min(Math.ceil(originalLength * 2.2), 2500); // 原文*2.2，最多2500
+
       const result = await AIService.generate(prompt, {
         provider,
         temperature: 0.3, // 低溫模式，確保穩定性與精確度
-        max_tokens: 2000
+        max_tokens: maxTokens
       });
       
       // 🔧 清理 Markdown 標記
@@ -501,7 +600,7 @@ ${draftHtml}
    * 生成結論段落
    */
   static async generateConclusion(outline, sections, options = {}) {
-    const { provider, style_guide, verifiedSources: passedSources } = options;
+    const { provider, style_guide, verifiedSources: passedSources, author_bio, author_values } = options;
 
     const mainPoints = sections.map(s => s.heading).join('\n- ');
 
@@ -516,6 +615,11 @@ ${outline.title}
 ## 結論結構
 ${JSON.stringify(outline.conclusion, null, 2)}
 
+## 👤 作者 Persona 與價值觀 (重要！)
+${author_bio ? `- 作者背景: ${author_bio}` : ''}
+${author_values ? `- 核心價值觀: ${author_values}` : ''}
+請務必將上述作者的觀點與風格融入寫作中，確保內容具有獨特性與個人色彩。
+
 ## 寫作要求
 1. 總結文章的核心要點
 2. 強調讀者的收穫與價值
@@ -528,13 +632,15 @@ ${style_guide ? `8. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 
 ## **E-E-A-T 引用規範（Citation Protocol）**：
 **嚴格禁止自行編造 URL。**
-- 如果需要引用，請使用 [1], [2] 標記（對應前文已使用的來源）。
-- 不要寫出完整的 URL。
+- 使用自然的表達方式，例如「根據研究顯示」「專家建議」等。
+- ❌ 不要寫出引用標記如 [1], [2] 等。
+- ❌ 不要寫出完整的 URL。
 
 ## 輸出格式
 - 使用 HTML 格式
 - 包含 <h2> 標題、<p> 段落、<ul> 列表
 - 字數約 150-200 字
+- 不要包含任何引用標記
 - 直接輸出 HTML，無需其他說明
 
 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容。`;

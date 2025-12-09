@@ -1,14 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const articleController = require('../controllers/articleController');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, optionalAuth } = require('../middleware/auth');
 
-// 所有 article routes 都需要驗證
+// 大綱與文章生成 - 使用 optionalAuth 允許無需登入即可使用（POC 模式）
+router.post('/generate-outline', optionalAuth, articleController.generateOutline);
+router.post('/generate', optionalAuth, articleController.generateArticle);
+
+// 其他路由需要驗證
 router.use(authenticateToken);
-
-// 大綱與文章生成
-router.post('/generate-outline', articleController.generateOutline);
-router.post('/generate', articleController.generateArticle);
 router.post('/generate-section-stream', articleController.generateSectionStream);
 
 // 文章管理

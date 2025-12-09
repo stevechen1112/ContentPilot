@@ -12,8 +12,10 @@ class OutlineService {
         serp_data = null,
         target_audience = '一般讀者',
         tone = '專業但易懂',
-        word_count = 2000,
-        provider = 'gemini'
+        word_count = 2500,
+        provider = process.env.AI_PROVIDER || 'openai',
+        author_bio,
+        author_values
       } = options;
 
       // 全面使用 Gemini
@@ -57,15 +59,83 @@ class OutlineService {
       const prompt = this.buildOutlinePrompt(keyword, serpAnalysis, competitorInsights, {
         target_audience,
         tone,
-        word_count
+        word_count,
+        author_bio,
+        author_values,
+        provider  // 傳入 provider 以調整 prompt 長度
       });
 
+      // 定義大綱的 JSON Schema（用於 Gemini 3 結構化輸出）
+      const outlineSchema = {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "SEO 優化後的文章標題" },
+          meta_description: { type: "string", description: "140-160 字的 meta description" },
+          introduction: {
+            type: "object",
+            properties: {
+              hook: { type: "string" },
+              context: { type: "string" },
+              thesis: { type: "string" }
+            },
+            required: ["hook", "context", "thesis"]
+          },
+          sections: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                heading: { type: "string" },
+                key_points: { type: "array", items: { type: "string" } },
+                subsections: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      heading: { type: "string" },
+                      description: { type: "string" }
+                    },
+                    required: ["heading", "description"]
+                  }
+                },
+                estimated_words: { type: "integer" }
+              },
+              required: ["heading", "key_points", "estimated_words"]
+            }
+          },
+          conclusion: {
+            type: "object",
+            properties: {
+              summary: { type: "string" },
+              call_to_action: { type: "string" }
+            },
+            required: ["summary", "call_to_action"]
+          },
+          keywords: {
+            type: "object",
+            properties: {
+              primary: { type: "string" },
+              secondary: { type: "array", items: { type: "string" } },
+              lsi: { type: "array", items: { type: "string" } }
+            },
+            required: ["primary", "secondary", "lsi"]
+          }
+        },
+        required: ["title", "meta_description", "introduction", "sections", "conclusion", "keywords"]
+      };
+
       // 呼叫 AI 生成大綱
-      const result = await AIService.generate(prompt, {
-        provider,
+      const aiOptions = {
         temperature: 0.6,
-        max_tokens: 2048
-      });
+        max_tokens: 8192  // 增加到 8192 以確保 JSON 完整
+      };
+
+      // Gemini 支援結構化輸出，OpenAI 使用純文字 JSON
+      if (provider === 'gemini') {
+        aiOptions.responseSchema = outlineSchema;
+      }
+
+      const result = await AIService.generate(prompt, aiOptions);
 
       // 解析 AI 回應（假設返回 JSON 格式）
       const outline = this.parseOutlineResponse(result.content);
@@ -96,7 +166,7 @@ class OutlineService {
    * 建構大綱生成 Prompt
    */
   static buildOutlinePrompt(keyword, serpAnalysis, competitorInsights, options) {
-    const { target_audience, tone, word_count } = options;
+    const { target_audience, tone, word_count, author_bio, author_values, provider = 'openai' } = options;
 
     // 提取 SERP 關鍵資訊 (S2)
     const topTitles = serpAnalysis.topResults?.slice(0, 5).map(r => r.title).join('\n- ') || '';
@@ -112,6 +182,56 @@ class OutlineService {
       }).join('\n');
     }
 
+    // OpenAI 簡化版 Prompt (節省 token)
+    if (provider === 'openai') {
+      const targetSections = Math.min(Math.max(Math.ceil(word_count / 600), 4), 5); // 4-5個章節
+      const wordsPerSection = Math.floor((word_count - 400) / targetSections); // 扣除前言+結論
+      
+      return `你是專業 SEO 策劃師，為「${keyword}」設計文章大綱。
+
+**嚴格限制**
+- 總字數: ${word_count} 字
+- 主章節: ${targetSections} 個（H2，必須是 SCQA 對應章節）
+- 每章字數: ${wordsPerSection} 字
+- 子標題: 1-2 個/章（H3，不要超過2個）
+- 受眾: ${target_audience} | 風格: ${tone}
+${author_bio ? `
+**作者身分與觀點（必須貫穿全文）**
+- 背景: ${author_bio}
+- 核心價值觀: ${author_values}
+- 要求：每個章節標題與內容都要反映此作者的獨特視角，避免泛泛而談。` : ''}
+
+**SERP 參考**
+${topTitles}
+
+**讀者痛點（FAQ）**
+${peopleAlsoAsk}
+
+**結構約束（SCQA 必須明確對應 H2）**
+1. 引言：S（現狀）+ C（衝突/問題）
+2. H2-1：Q（核心問題）—— 標題需含問句或痛點關鍵字
+3. H2-2 至 H2-${targetSections-1}：A（解答/方法）—— 每個 H2 對應一個主要解決方案
+4. H2-${targetSections}：結論與行動呼籲
+5. 每個 H2 下必須有 1-2 個 H3 子標題（不超過2個），形成完整層級。
+
+**標題要求**
+- H2 標題需含語意化關鍵字（如「${keyword}」的變形詞）
+- 禁止使用「深入探討」「全面解析」等空泛詞，改用具體動作詞（如「3步驟掌握」「5大誤區避免」）
+
+**JSON輸出（無其他文字）：**
+\`\`\`json
+{
+  "title": "含${keyword}，60字內，加誘因詞（如：新手必讀/完整攻略/3步驟）",
+  "meta_description": "140-160字，重申${keyword}，含行動呼籲",
+  "introduction": {"hook":"吸睛開場（統計數據/故事/痛點）","context":"S現狀+C衝突","thesis":"Q核心問題陳述"},
+  "sections": [{"heading":"主標題文字（SCQA-Q或A階段，含關鍵字變形，不要加H2:前綴）","key_points":["具體重點1","具體重點2"],"subsections":[{"heading":"子主題（不要加H3:前綴）","description":"1-2句說明"}],"estimated_words":${wordsPerSection}}],
+  "conclusion": {"summary":"總結核心價值","call_to_action":"明確CTA（如：立即下載/開始實踐）"},
+  "keywords": {"primary":"${keyword}","secondary":["次要詞2-3個"],"lsi":["LSI詞5-8個"]}
+}
+\`\`\``;
+    }
+
+    // Gemini 完整版 Prompt
     const prompt = `你是一位專業的 SEO 內容策劃師。請根據以下資訊，為「${keyword}」這個主題設計一份完整的文章大綱。
     
     注意：提供的 SERP 分析資料可能包含不相關的內容。請務必過濾這些雜訊，僅參考與「${keyword}」高度相關的資訊。
@@ -130,6 +250,11 @@ ${tone}
 ### 目標字數
 約 ${word_count} 字
 
+### 作者 Persona 與價值觀 (重要！)
+${author_bio ? `- 作者背景: ${author_bio}` : ''}
+${author_values ? `- 核心價值觀: ${author_values}` : ''}
+請務必將上述作者的觀點與風格融入大綱設計中，確保內容具有獨特性與個人色彩。
+
 ### S2 搜尋意圖分析（Google 前 5 名標題）
 - ${topTitles}
 
@@ -142,30 +267,38 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
 ### 相關搜尋
 - ${relatedSearches}
 
-## 輸出格式要求
+## 結構要求：SCQA 架構
+請採用 **SCQA (Situation, Complication, Question, Answer)** 架構來組織文章結構：
+1. **Situation (情境)**: 在前言或第一段建立讀者共鳴的背景情境。
+2. **Complication (衝突)**: 指出讀者面臨的痛點、挑戰或矛盾。
+3. **Question (問題)**: 明確提出本文要解決的核心問題。
+4. **Answer (答案)**: 透過文章的主體段落提供完整的解決方案。
 
-請以 JSON 格式輸出，結構如下：
+## 其他注意事項
+1. 標題需符合 SEO 最佳實踐（包含關鍵字、60字以內）
+2. 結構需涵蓋使用者搜尋意圖（informational, navigational, transactional）
+3. 每個 section 需有明確的價值，避免空洞內容
+5. 回答 People Also Ask 的問題
+6. 確保內容符合 E-E-A-T 原則（經驗、專業、權威、信任）
+7. 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容
+8. **重要**：標題文字請直接撰寫，不要加「H2:」或「H3:」等前綴標記
 
+## 輸出格式
+請**只輸出**符合以下 JSON 結構的大綱，不要包含任何其他文字或說明：
 \`\`\`json
 {
-  "title": "SEO 優化後的文章標題（請基於你分析出的核心關鍵字，設計一個高點擊率的標題）",
-  "meta_description": "請撰寫 140-160 字的精彩 meta description，需包含：1) 主要關鍵字 2) 核心價值主張 3) 行動呼籲或獨特賣點。範例：『想解決 XXX 問題？本文提供 5 個經專家驗證的方法，幫助你在 30 天內看到成效。立即了解如何...』",
+  "title": "SEO 優化後的文章標題（60字以內，包含關鍵字）",
+  "meta_description": "140-160 字的 meta description",
   "introduction": {
-    "hook": "開場吸引句（痛點或好奇心）",
-    "context": "背景說明",
-    "thesis": "本文主旨與價值主張"
+    "hook": "開場引言（吸引讀者注意）",
+    "context": "背景介紹（建立情境 - SCQA 的 S）",
+    "thesis": "文章主旨（指出問題與解答 - SCQA 的 C+Q）"
   },
   "sections": [
     {
-      "heading": "H2 標題",
-      "key_points": ["要點1", "要點2", "要點3"],
-      "subsections": [
-        {
-          "heading": "H3 標題",
-          "description": "這個段落要寫什麼"
-        }
-      ],
-      "estimated_words": 300
+      "title": "章節標題（直接寫標題，不要加H2:前綴）",
+      "description": "章節摘要說明（簡述本章節要解決的問題或提供的價值）",
+      "subsections": ["子標題 1（直接寫，不要加H3:）", "子標題 2", "..."]
     }
   ],
   "conclusion": {
@@ -173,23 +306,14 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
     "call_to_action": "行動呼籲"
   },
   "keywords": {
-    "primary": "請從用戶主題中提取最核心的 SEO 關鍵字（例如：若主題是『小型電商如何用 AI 客服省錢』，核心關鍵字應為『小型電商 AI 客服』）",
-    "secondary": ["次要關鍵字1", "次要關鍵字2"],
-    "lsi": ["LSI關鍵字1", "LSI關鍵字2"]
+    "primary": "主要關鍵字",
+    "secondary": ["次要關鍵字 1", "次要關鍵字 2"],
+    "lsi": ["LSI 關鍵字 1", "LSI 關鍵字 2"]
   }
 }
 \`\`\`
 
-## 注意事項
-1. 標題需符合 SEO 最佳實踐（包含關鍵字、60字以內）
-2. 結構需涵蓋使用者搜尋意圖（informational, navigational, transactional）
-3. 每個 section 需有明確的價值，避免空洞內容
-4. 參考競爭對手的結構優點，但需創新
-5. 回答 People Also Ask 的問題
-6. 確保內容符合 E-E-A-T 原則（經驗、專業、權威、信任）
-
-請直接輸出 JSON，不要有其他說明文字。
-請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容。`;
+請立即產生上述 JSON 格式的完整大綱，不要有其他任何說明文字。`;
 
     return prompt;
   }
@@ -278,7 +402,7 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
    * 優化現有大綱（人工修改後重新調整）
    */
   static async optimizeOutline(outline, feedback, options = {}) {
-    const { provider = 'gemini' } = options;
+    const { provider = process.env.AI_PROVIDER || 'openai' } = options;
 
     const prompt = `你是一位 SEO 內容策劃師。請根據使用者的反饋，優化以下文章大綱。
 

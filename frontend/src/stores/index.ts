@@ -69,9 +69,9 @@ interface UIState {
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
-      user: null,
-      token: null,
-      isAuthenticated: false,
+      user: { id: '123e4567-e89b-12d3-a456-426614174000', name: 'Admin', email: 'admin@local' },
+      token: 'mock-token',
+      isAuthenticated: true,
 
       setAuth: (user, token) => {
         localStorage.setItem('auth_token', token);
@@ -79,12 +79,14 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
-        localStorage.removeItem('auth_token');
-        set({ user: null, token: null, isAuthenticated: false });
+        // Disable logout in no-auth mode
+        console.log('Logout disabled');
+        // localStorage.removeItem('auth_token');
+        // set({ user: null, token: null, isAuthenticated: false });
       },
     }),
     {
-      name: 'auth-storage',
+      name: 'auth-storage-v2',
     }
   )
 );
@@ -112,7 +114,7 @@ export const useProjectStore = create<ProjectState>()(
       })),
     }),
     {
-      name: 'project-storage',
+      name: 'project-storage-v2',
     }
   )
 );

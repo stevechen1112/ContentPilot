@@ -1,3 +1,414 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 列印樣式 - 優化 PDF 匯出 */
+@media print {
+  /* 隱藏工具列和導航 */
+  .sticky, button, nav, aside, .no-print {
+    display: none !important;
+  }
+  
+  /* 移除頁面邊距，使用文章本身的邊距 */
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+  
+  /* 優化文章顯示 */
+  article {
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    padding: 20pt !important;
+  }
+  
+  /* 移除漸層背景，改用純白色 */
+  .bg-gradient-to-r,
+  .prose .introduction,
+  .prose .conclusion {
+    background: white !important;
+    border: none !important;
+    padding-left: 0 !important;
+  }
+  
+  /* 確保內容不被截斷 */
+  * {
+    page-break-inside: avoid;
+  }
+  
+  h1, h2, h3, h4 {
+    page-break-after: avoid;
+  }
+  
+  /* 優化字體 - 使用 prose 類別的樣式 */
+  .prose h1 {
+    font-size: 24pt !important;
+    margin-bottom: 12pt !important;
+    margin-top: 0 !important;
+    border-bottom: none !important;
+  }
+  
+  .prose h2 {
+    font-size: 18pt !important;
+    margin-top: 16pt !important;
+    margin-bottom: 10pt !important;
+    border-bottom: 1pt solid #e5e7eb !important;
+    padding-bottom: 4pt !important;
+  }
+  
+  .prose h3 {
+    font-size: 14pt !important;
+    margin-top: 12pt !important;
+    margin-bottom: 8pt !important;
+  }
+  
+  .prose h4 {
+    font-size: 12pt !important;
+    margin-top: 10pt !important;
+    margin-bottom: 6pt !important;
+  }
+  
+  .prose p {
+    font-size: 11pt !important;
+    line-height: 1.6 !important;
+    margin-bottom: 10pt !important;
+  }
+  
+  .prose ul, .prose ol {
+    margin-top: 8pt !important;
+    margin-bottom: 10pt !important;
+    padding-left: 20pt !important;
+  }
+  
+  .prose li {
+    font-size: 11pt !important;
+    line-height: 1.6 !important;
+    margin-bottom: 6pt !important;
+  }
+  
+  /* 連結樣式 */
+  .prose a {
+    color: #2563eb !important;
+    text-decoration: underline !important;
+  }
+  
+  /* 引用區塊 */
+  .prose blockquote {
+    border-left: 2pt solid #2563eb !important;
+    padding-left: 10pt !important;
+    margin: 10pt 0 !important;
+    background: #f9fafb !important;
+    padding: 8pt 10pt !important;
+  }
+  
+  /* 程式碼 */
+  .prose code {
+    background: #f3f4f6 !important;
+    padding: 2pt 4pt !important;
+    font-size: 10pt !important;
+  }
+  
+  .prose pre {
+    background: #f3f4f6 !important;
+    border: 1pt solid #e5e7eb !important;
+    padding: 10pt !important;
+    margin: 10pt 0 !important;
+  }
+  
+  .prose pre code {
+    background: transparent !important;
+    font-size: 9pt !important;
+  }
+  
+  /* 圖片 */
+  .prose img {
+    max-width: 100% !important;
+    height: auto !important;
+    margin: 10pt auto !important;
+    box-shadow: none !important;
+  }
+  
+  /* 表格 */
+  .prose table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin: 10pt 0 !important;
+  }
+  
+  .prose th, .prose td {
+    border: 1pt solid #e5e7eb !important;
+    padding: 6pt 8pt !important;
+    font-size: 10pt !important;
+  }
+  
+  .prose th {
+    background: #f9fafb !important;
+  }
+  
+  /* 分隔線 */
+  .prose hr {
+    border-top: 1pt solid #e5e7eb !important;
+    margin: 16pt 0 !important;
+  }
+  
+  /* 隱藏元數據圖示 */
+  svg {
+    display: none !important;
+  }
+  
+  /* 優化元數據顯示 */
+  .text-gray-600 {
+    font-size: 9pt !important;
+    color: #6b7280 !important;
+  }
+}
+
+/* 自定義動畫 */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-in-out;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.6s ease-out;
+}
+
+.animate-progress {
+  animation: progress 2s ease-in-out infinite;
+}
+
+/* 滾動條樣式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* 文章內容樣式優化 */
+.prose {
+  color: #1f2937;
+  max-width: none;
+}
+
+.prose h1 {
+  font-size: 2.25rem;
+  font-weight: 800;
+  line-height: 1.2;
+  margin-bottom: 1.5rem;
+  color: #111827;
+  letter-spacing: -0.025em;
+}
+
+.prose h2 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-top: 2.5rem;
+  margin-bottom: 1.25rem;
+  color: #1f2937;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.prose h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  color: #374151;
+}
+
+.prose h4 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: #4b5563;
+}
+
+.prose p {
+  font-size: 1.125rem;
+  line-height: 1.8;
+  margin-bottom: 1.25rem;
+  color: #374151;
+}
+
+.prose ul, .prose ol {
+  margin-top: 1rem;
+  margin-bottom: 1.5rem;
+  padding-left: 1.75rem;
+}
+
+.prose li {
+  font-size: 1.125rem;
+  line-height: 1.8;
+  margin-bottom: 0.75rem;
+  color: #374151;
+}
+
+.prose ul li {
+  list-style-type: disc;
+}
+
+.prose ol li {
+  list-style-type: decimal;
+}
+
+.prose strong {
+  font-weight: 700;
+  color: #111827;
+}
+
+.prose em {
+  font-style: italic;
+}
+
+.prose a {
+  color: #2563eb;
+  text-decoration: underline;
+  text-decoration-color: #93c5fd;
+  transition: all 0.2s;
+}
+
+.prose a:hover {
+  color: #1d4ed8;
+  text-decoration-color: #2563eb;
+}
+
+.prose blockquote {
+  border-left: 4px solid #2563eb;
+  padding-left: 1.5rem;
+  margin: 1.5rem 0;
+  font-style: italic;
+  color: #4b5563;
+  background: #f9fafb;
+  padding: 1rem 1.5rem;
+  border-radius: 0.375rem;
+}
+
+.prose code {
+  background: #f3f4f6;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.9em;
+  color: #ef4444;
+  font-family: 'Monaco', 'Courier New', monospace;
+}
+
+.prose pre {
+  background: #1f2937;
+  color: #f9fafb;
+  padding: 1.25rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+}
+
+.prose pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+.prose img {
+  border-radius: 0.5rem;
+  margin: 2rem auto;
+  max-width: 100%;
+  height: auto;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.prose hr {
+  border: none;
+  border-top: 2px solid #e5e7eb;
+  margin: 2.5rem 0;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+}
+
+.prose th, .prose td {
+  border: 1px solid #e5e7eb;
+  padding: 0.75rem 1rem;
+  text-align: left;
+}
+
+.prose th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #111827;
+}
+
+.prose .introduction {
+  font-size: 1.25rem;
+  line-height: 1.8;
+  color: #4b5563;
+  margin-bottom: 2.5rem;
+  padding: 1.5rem;
+  background: linear-gradient(to right, #eff6ff, #f0f9ff);
+  border-left: 4px solid #3b82f6;
+  border-radius: 0.5rem;
+}
+
+.prose .section {
+  margin-bottom: 2rem;
+}
+
+.prose .conclusion {
+  margin-top: 3rem;
+  padding: 1.5rem;
+  background: linear-gradient(to right, #fef3c7, #fef9e7);
+  border-left: 4px solid #f59e0b;
+  border-radius: 0.5rem;
+  font-size: 1.125rem;
+  line-height: 1.8;
+}

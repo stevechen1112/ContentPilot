@@ -5,7 +5,7 @@ const SerperService = require('./src/services/serperService');
 const fs = require('fs');
 const path = require('path');
 
-const TOPIC = '上背痛原因';
+const TOPIC = '長骨刺怎麼辦';
 
 async function generateGeminiOnlyArticle() {
   console.log(`🚀 開始測試 Gemini-Only 模式生成文章...`);

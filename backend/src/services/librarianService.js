@@ -158,7 +158,8 @@ class LibrarianService {
   }
 
   /**
-   * 將文章中的引用標記 [1] 替換為真實 HTML 連結
+   * 移除文章中的引用標記 [1], [2] 等
+   * 不再顯示引用標記，保持文章更簡潔易讀
    */
   injectCitations(html, sources) {
     if (!sources || sources.length === 0) return html;
@@ -169,12 +170,8 @@ class LibrarianService {
       const marker = `\\[${index + 1}\\]`;
       const regex = new RegExp(marker, 'g');
       
-      // 替換為帶連結的引用，例如：...研究顯示<a href="..." class="citation">[1]</a>
-      // 或者直接將文字轉為連結
-      
-      // 策略：將 [1] 替換為上標連結
-      const citationHtml = `<sup class="citation"><a href="${source.url}" title="${source.title}" target="_blank">[${index + 1}]</a></sup>`;
-      processedHtml = processedHtml.replace(regex, citationHtml);
+      // 🔧 直接移除引用標記，不保留任何痕跡
+      processedHtml = processedHtml.replace(regex, '');
     });
 
     return processedHtml;

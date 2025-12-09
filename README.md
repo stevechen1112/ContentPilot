@@ -1,33 +1,128 @@
-# ContentPilot (SEO ContentForge)
+# ContentPilot - SEO 自動化內容生產系統 (POC)
 
-SEO 自動化內容生產系統 - 結合 AI 骨架與人類靈魂的高效寫作平台。
+Google 風格的極簡文章生成工具 - 輸入關鍵字，自動生成完整 SEO 優化文章。
 
-## 🚀 專案簡介
+## 🚀 快速開始
 
-ContentPilot 是一個協助內容創作者快速生產高品質 SEO 文章的工具。它利用 **Google Gemini 2.0 Flash** 的強大能力自動生成 85 分的基礎內容，並提供智能介面引導使用者補充關鍵的「真實經驗」，最終產出符合 Google E-E-A-T 標準的優質文章。
+### 前置需求
+- Node.js 18+
+- PostgreSQL (透過 Docker)
 
-本系統已全面採用 **Gemini API** 作為核心 AI 引擎，移除了對本地 LLM (Ollama) 的依賴，大幅降低部署門檻並提升生成速度與品質。
+### 安裝步驟
+
+1. **啟動資料庫**
+   ```bash
+   docker-compose up -d
+   ```
+
+2. **啟動後端**
+   ```bash
+   cd backend
+   npm install
+   npm run dev
+   ```
+   後端運行於 `http://localhost:3000`
+
+3. **啟動前端**
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   前端運行於 `http://localhost:5173`
+
+4. **開始使用**
+   - 打開瀏覽器訪問 `http://localhost:5173`
+   - 輸入關鍵字（例如：日本旅遊、健康飲食）
+   - 點擊生成按鈕
+   - 等待 1-3 分鐘即可獲得完整文章
+
+## ✨ 主要功能
+
+### 🎯 Google 風格介面
+- 極簡搜尋框設計
+- 無需登入，直接使用
+- 一鍵生成完整文章
+
+### 📝 文章生成
+- **自動大綱生成**：根據關鍵字分析並生成文章結構
+- **完整內容撰寫**：包含引言、多個章節、結論
+- **SEO 優化**：自動整合權威來源引用
+- **生成時間**：約 1-3 分鐘
+
+### 📄 文章管理
+- **全頁面顯示**：獨立的文章閱讀介面
+- **一鍵複製**：複製 HTML 格式內容
+- **匯出 PDF**：使用瀏覽器列印功能匯出
 
 ## 🛠️ 技術架構
 
-- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
-- **Backend**: Node.js, Express
-- **AI Engine**: Google Gemini API (Gemini 2.0 Flash / Pro)
-- **Search Engine**: Serper.dev API (Google Search Results)
-- **Database**: PostgreSQL (主要資料), MongoDB (日誌/文件), Redis (快取)
+- **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS
+- **Backend**: Node.js + Express
+- **AI Engine**: Google Gemini API (`gemini-2.0-flash-exp`)
+- **Database**: PostgreSQL
+- **搜尋整合**: Serper.dev API
 
-## ✨ 核心功能
+## 📁 專案結構
 
-### 1. 主題驅動生成 (Topic-Driven Generation)
-- **關鍵字即主題**：直接輸入目標關鍵字（如「上背痛原因」），系統自動判讀意圖並生成對應文章。
-- **客製化設定**：支援設定「目標受眾」（如：一般大眾、專業人士）與「語氣」（如：專業親切、幽默風趣）。
+```
+ContentPilot/
+├── frontend/          # React 前端應用
+│   ├── src/
+│   │   ├── pages/     # 頁面組件
+│   │   ├── components/# 共用組件
+│   │   ├── lib/       # API 客戶端
+│   │   └── stores/    # 狀態管理
+│   └── package.json
+├── backend/           # Node.js 後端 API
+│   ├── src/
+│   │   ├── controllers/
+│   │   ├── services/  # AI 服務層
+│   │   ├── routes/
+│   │   └── middleware/
+│   └── .env          # 環境變數配置
+├── docker-compose.yml # 資料庫容器配置
+└── README.md
 
-### 2. 智能大綱與研究 (Smart Outline & Research)
-- **SERP 分析**：自動分析 Google 前幾名搜尋結果，提取熱門標題與結構。
-- **競爭對手分析**：深入分析競爭對手的文章結構 (H2/H3)，找出內容缺口。
-- **People Also Ask**：自動整合使用者常見問題，增加內容豐富度。
+```
 
-### 3. 高品質文章寫作 (High-Quality Writing)
+## ⚙️ 環境變數配置
+
+後端環境變數位於 `backend/.env`：
+
+```env
+# AI Provider
+AI_PROVIDER=gemini
+GOOGLE_GEMINI_API_KEY=你的API金鑰
+GOOGLE_GEMINI_MODEL=gemini-2.0-flash-exp
+
+# 搜尋 API
+SERPER_API_KEY=你的API金鑰
+
+# 資料庫
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/contentpilot_dev
+```
+
+## 🎨 使用範例
+
+1. **輸入關鍵字**：日本旅遊
+2. **系統處理**：
+   - 分析關鍵字意圖
+   - 生成文章大綱（5-7 個章節）
+   - 撰寫完整內容（引言、章節、結論）
+   - 整合權威來源引用
+3. **獲得文章**：
+   - 標題：「掌握日本旅遊的 5 大策略」
+   - 完整內容：約 2000-3000 字
+   - 包含權威來源連結
+   - 符合 SEO 優化標準
+
+## 📊 效能指標
+
+- **大綱生成**：10-30 秒
+- **文章生成**：1-3 分鐘
+- **文章長度**：2000-3000 字
+- **章節數量**：5-7 個
 - **Gemini 全面驅動**：從大綱規劃、引言撰寫到內文生成，全程使用 Gemini 模型，確保邏輯連貫與語意通順。
 - **E-E-A-T 優化**：內建權威來源檢索 (Librarian Service)，確保引用資料的可信度。
 - **自動引用**：文章中會自動標註參考來源，提升 SEO 權重。
@@ -78,7 +173,7 @@ npm install
 PORT=3000
 # AI Configuration
 GOOGLE_GEMINI_API_KEY=your_gemini_key
-GOOGLE_GEMINI_MODEL=gemini-2.0-flash-exp
+GOOGLE_GEMINI_MODEL=gemini-3-pro-preview
 
 # Search Configuration
 SERPER_API_KEY=your_serper_key

@@ -5,7 +5,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 // 建立 axios 實例
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 300000,
+  timeout: 600000,  // 增加到 10 分鐘（文章生成需要更長時間）
   headers: {
     'Content-Type': 'application/json',
   },
@@ -31,9 +31,10 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       // Token 過期或無效，清除並跳轉登入
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      // localStorage.removeItem('auth_token');
+      // localStorage.removeItem('user');
+      // window.location.href = '/login';
+      console.warn('API 401 Unauthorized - Ignoring in dev mode');
     }
     return Promise.reject(error);
   }
