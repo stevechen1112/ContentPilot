@@ -56,14 +56,32 @@ class ArticleController {
 
       // POC 模式：如果沒有 project_id，自動建立一個預設專案
       if (!project_id) {
-        const defaultProject = await ProjectModel.create({
-          name: '快速生成',
-          description: 'Auto-created for quick generation',
-          user_id: 'demo-user',
-          niche: 'general',
-          target_audience: target_audience || '一般讀者'
-        });
-        project_id = defaultProject.id;
+        try {
+          const defaultProject = await ProjectModel.create({
+            name: '快速生成',
+            description: 'Auto-created for quick generation',
+            user_id: 'demo-user', // 確保這裡的 user_id 與資料庫相容
+            niche: 'general',
+            target_audience: target_audience || '一般讀者'
+          });
+
+          if (!defaultProject) {
+            console.error('Failed to create default project: ProjectModel returned null/undefined');
+            throw new Error('Database error: Failed to create project');
+          }
+
+          project_id = defaultProject.id;
+        } catch (dbError) {
+          console.error('Database error in project creation:', dbError);
+          // 嘗試查找現有的 demo-user 專案作為 fallback
+          const projects = await ProjectModel.findByUserId('demo-user');
+          if (projects && projects.length > 0) {
+            project_id = projects[0].id;
+            console.log('Using existing project as fallback:', project_id);
+          } else {
+            return res.status(500).json({ error: 'System initialization failed: Cannot create project' });
+          }
+        }
       }
 
       // 生成文章（傳遞 serp_data 以供 E-E-A-T 和 SEO 優化使用）
@@ -88,17 +106,28 @@ class ArticleController {
         content_draft: cleanArticle,
       });
 
+      // Helper to ensure content is object
+      const ensureObject = (data) => {
+        if (typeof data === 'string') {
+          try { return JSON.parse(data); } catch (e) { return data; }
+        }
+        return data;
+      };
+
       // 如果有 keyword_id，更新關鍵字狀態
       if (keyword_id) {
         await KeywordModel.update(keyword_id, { status: 'completed' });
       }
+
+      const safeContent = ensureObject(savedArticle.content_draft);
 
       res.json({
         message: 'Article generated successfully',
         data: {
           article_id: savedArticle.id,
           ...savedArticle,
-          content: savedArticle.content_draft // Map content_draft to content for frontend
+          content_draft: safeContent,
+          content: safeContent // Map content_draft to content for frontend
         }
       });
     } catch (error) {
@@ -397,11 +426,21 @@ class ArticleController {
       // 驗證權限
       const project = await ProjectModel.findById(article.project_id);
 
+      const ensureObject = (data) => {
+        if (typeof data === 'string') {
+          try { return JSON.parse(data); } catch (e) { return data; }
+        }
+        return data;
+      };
+
+      const safeContent = ensureObject(article.content_draft);
+
       res.json({
         message: 'Article retrieved successfully',
         data: {
           ...article,
-          content: article.content_draft // Map for frontend
+          content_draft: safeContent, // Overwrite with parsed object
+          content: safeContent // Map for frontend
         }
       });
     } catch (error) {
