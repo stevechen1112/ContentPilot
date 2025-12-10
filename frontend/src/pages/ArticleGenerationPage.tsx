@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useProjectStore, useUIStore } from '../stores';
-import { articleAPI, projectAPI } from '../lib/api';
+import { articleAPI, projectAPI, researchAPI } from '../lib/api';
 import { Search, Loader2, Sparkles } from 'lucide-react';
 
 export default function ArticleGenerationPage() {
@@ -97,9 +97,21 @@ export default function ArticleGenerationPage() {
     }
 
     setLoading(true);
-    setGenerationStatus('正在分析關鍵字並生成大綱...');
+    setGenerationStatus('正在分析 Google 搜尋結果與競爭對手...');
 
     try {
+      // Step 1: 先進行 SERP 分析，取得「別人寫了什麼」與「讀者問了什麼」
+      let serpData = null;
+      try {
+        setGenerationStatus('正在分析 Google SERP 資料...');
+        const serpRes = await researchAPI.analyzeKeyword(keyword);
+        serpData = serpRes.data.data;
+        console.log('✅ SERP 分析完成:', serpData);
+      } catch (serpError) {
+        console.warn('⚠️ SERP 分析失敗，將使用預設模式:', serpError);
+        // 即使 SERP 失敗，仍繼續生成（但會是憑空想像模式）
+      }
+
       const defaultSettings = {
         tone,
         target_audience: targetAudience,
@@ -110,7 +122,8 @@ export default function ArticleGenerationPage() {
         personal_experience: personalExperience
       };
 
-      const outlineRes = await articleAPI.generateOutline(keyword, currentProject.id, null, defaultSettings);
+      setGenerationStatus('正在根據 SERP 資料與您的獨特觀點生成大綱...');
+      const outlineRes = await articleAPI.generateOutline(keyword, currentProject.id, serpData, defaultSettings);
       const rawOutline = outlineRes.data.data;
 
       if (!rawOutline || rawOutline.parse_error) {
