@@ -42,89 +42,89 @@ apiClient.interceptors.response.use(
 
 // ==================== Auth API ====================
 export const authAPI = {
-  register: (data) => apiClient.post('/auth/register', data),
-  login: (data) => apiClient.post('/auth/login', data),
+  register: (data: any) => apiClient.post('/auth/register', data),
+  login: (data: any) => apiClient.post('/auth/login', data),
 };
 
 // ==================== Project API ====================
 export const projectAPI = {
-  create: (data) => apiClient.post('/projects', data),
+  create: (data: any) => apiClient.post('/projects', data),
   getAll: () => apiClient.get('/projects'),
-  getById: (id) => apiClient.get(`/projects/${id}`),
-  update: (id, data) => apiClient.put(`/projects/${id}`, data),
-  delete: (id) => apiClient.delete(`/projects/${id}`),
+  getById: (id: string) => apiClient.get(`/projects/${id}`),
+  update: (id: string, data: any) => apiClient.put(`/projects/${id}`, data),
+  delete: (id: string) => apiClient.delete(`/projects/${id}`),
 
   // Keywords
-  addKeywords: (projectId, keywords) =>
+  addKeywords: (projectId: string, keywords: any[]) =>
     apiClient.post(`/projects/${projectId}/keywords`, { keywords }),
-  getKeywords: (projectId, params) =>
+  getKeywords: (projectId: string, params: any) =>
     apiClient.get(`/projects/${projectId}/keywords`, { params }),
-  updateKeyword: (projectId, keywordId, data) =>
+  updateKeyword: (projectId: string, keywordId: string, data: any) =>
     apiClient.put(`/projects/${projectId}/keywords/${keywordId}`, data),
-  deleteKeyword: (projectId, keywordId) =>
+  deleteKeyword: (projectId: string, keywordId: string) =>
     apiClient.delete(`/projects/${projectId}/keywords/${keywordId}`),
 };
 
 // ==================== Research API ====================
 export const researchAPI = {
-  analyzeKeyword: (keyword) =>
+  analyzeKeyword: (keyword: string) =>
     apiClient.post('/research/analyze-keyword', { keyword }),
-  analyzeBatch: (projectId, keywords) =>
+  analyzeBatch: (projectId: string, keywords: string[]) =>
     apiClient.post('/research/analyze-batch', { project_id: projectId, keywords }),
-  getRelatedSearches: (keyword) =>
+  getRelatedSearches: (keyword: string) =>
     apiClient.get('/research/related-searches', { params: { keyword } }),
-  expandKeywords: (seedKeyword, projectId) =>
+  expandKeywords: (seedKeyword: string, projectId: string) =>
     apiClient.post('/research/expand-keywords', { seed_keyword: seedKeyword, project_id: projectId }),
 };
 
 // ==================== Article API ====================
 export const articleAPI = {
-  generateOutline: (keyword, projectId, serpData, options = {}) =>
+  generateOutline: (keyword: string, projectId: string, serpData: any, options: any = {}) =>
     apiClient.post('/articles/generate-outline', {
       keyword,
       project_id: projectId,
       serp_data: serpData,
       ...options
     }),
-  generate: (projectId, keywordId, outline, options = {}) =>
-    apiClient.post('/articles/generate', { 
-      project_id: projectId, 
-      keyword_id: keywordId, 
+  generate: (projectId: string, keywordId: string | null, outline: any, options: any = {}) =>
+    apiClient.post('/articles/generate', {
+      project_id: projectId,
+      keyword_id: keywordId,
       outline,
-      ...options 
+      ...options
     }),
-  getAll: (projectId, status) =>
+  getAll: (projectId: string, status?: string) =>
     apiClient.get('/articles', { params: { project_id: projectId, status } }),
-  getById: (id) => apiClient.get(`/articles/${id}`),
-  update: (id, data) => apiClient.put(`/articles/${id}`, data),
-  delete: (id) => apiClient.delete(`/articles/${id}`),
+  getById: (id: string) => apiClient.get(`/articles/${id}`),
+  update: (id: string, data: any) => apiClient.put(`/articles/${id}`, data),
+  delete: (id: string) => apiClient.delete(`/articles/${id}`),
 
   // Smart Rewrite
-  rewriteSection: (articleId, sectionIndex, originalContent, userInput) =>
+  rewriteSection: (articleId: string, sectionIndex: number, originalContent: string, userInput: string) =>
     apiClient.post('/articles/rewrite-section', {
       article_id: articleId,
       section_index: sectionIndex,
       original_content: originalContent,
       user_input: userInput
     }),
-  
+
   // Quality Check (舊版，兼容性)
-  qualityCheck: (id, targetKeyword) =>
+  qualityCheck: (id: string, targetKeyword: string) =>
     apiClient.post(`/articles/${id}/quality-check`, { target_keyword: targetKeyword }),
-  
+
   // S6 綜合品質檢查（新版）
-  comprehensiveQualityCheck: (id, targetKeyword, serpData = null) =>
-    apiClient.post(`/articles/${id}/comprehensive-quality-check`, { 
+  comprehensiveQualityCheck: (id: string, targetKeyword: string, serpData: any = null) =>
+    apiClient.post(`/articles/${id}/comprehensive-quality-check`, {
       target_keyword: targetKeyword,
-      serp_data: serpData 
+      serp_data: serpData
     }),
-  
+
   // S8 經驗缺口檢測（核心功能）
-  detectExperienceGaps: (id, targetKeyword) =>
+  detectExperienceGaps: (id: string, targetKeyword: string) =>
     apiClient.post(`/articles/${id}/detect-experience-gaps`, { target_keyword: targetKeyword }),
-  
+
   // S8 智能融合重寫
-  smartRewrite: (id, sectionId, userExperience, sectionHeading = '') =>
+  smartRewrite: (id: string, sectionId: number, userExperience: string, sectionHeading: string = '') =>
     apiClient.post(`/articles/${id}/smart-rewrite`, {
       section_id: sectionId,
       user_experience: userExperience,

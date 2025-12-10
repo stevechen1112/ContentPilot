@@ -1,23 +1,23 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, useProjectStore, useUIStore } from '../stores';
-import { 
-  LayoutDashboard, 
-  FolderOpen, 
-  FileText, 
-  Settings, 
+import {
+  LayoutDashboard,
+  FolderOpen,
+  FileText,
+  Settings,
   LogOut,
   Menu,
   X,
   Plus
 } from 'lucide-react';
 
-export default function Layout({ children }) {
+export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
   const { currentProject } = useProjectStore();
   const { sidebarOpen, toggleSidebar } = useUIStore();
-  
+
   // Check if we are on the simple article generation page
   const isSimplePage = location.pathname === '/articles/new' || location.pathname === '/';
 
@@ -37,10 +37,9 @@ export default function Layout({ children }) {
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
       {!isSimplePage && (
-        <aside 
-          className={`fixed left-0 top-0 h-full bg-white border-r border-gray-200 transition-all duration-300 z-40 ${
-            sidebarOpen ? 'w-64' : 'w-0'
-          } overflow-hidden`}
+        <aside
+          className={`fixed left-0 top-0 h-full bg-white border-r border-gray-200 transition-all duration-300 z-40 ${sidebarOpen ? 'w-64' : 'w-0'
+            } overflow-hidden`}
         >
           <div className="p-6">
             <div className="flex items-center justify-between mb-8">
@@ -74,16 +73,15 @@ export default function Layout({ children }) {
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
-                
+
                 return (
                   <Link
                     key={item.path}
                     to={item.path}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      isActive
+                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${isActive
                         ? 'bg-primary-100 text-primary-700 font-medium'
                         : 'text-gray-700 hover:bg-gray-100'
-                    }`}
+                      }`}
                   >
                     <Icon className="w-5 h-5" />
                     <span>{item.label}</span>
@@ -118,10 +116,9 @@ export default function Layout({ children }) {
       )}
 
       {/* Main Content */}
-      <div 
-        className={`flex-1 transition-all duration-300 ${
-          !isSimplePage && sidebarOpen ? 'lg:ml-64' : 'ml-0'
-        }`}
+      <div
+        className={`flex-1 transition-all duration-300 ${!isSimplePage && sidebarOpen ? 'lg:ml-64' : 'ml-0'
+          }`}
       >
         {/* Top Bar */}
         {!isSimplePage && (
@@ -133,7 +130,7 @@ export default function Layout({ children }) {
               >
                 <Menu className="w-5 h-5" />
               </button>
-              
+
               <div className="flex items-center gap-4">
                 {currentProject && (
                   <div className="hidden md:block">

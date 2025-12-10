@@ -15,7 +15,11 @@ class ArticleService {
         additional_context = null,
         serp_data = null,
         author_bio,
-        author_values
+        author_values,
+        target_audience,
+        unique_angle,
+        expected_outline,
+        personal_experience
       } = options;
 
       console.log('📝 開始生成文章...');
@@ -37,7 +41,11 @@ class ArticleService {
         serp_data,
         verifiedSources, // 傳遞來源
         author_bio,
-        author_values
+        author_values,
+        target_audience,
+        unique_angle,
+        expected_outline,
+        personal_experience
       });
 
       const sections = [];
@@ -48,7 +56,11 @@ class ArticleService {
           serp_data,
           verifiedSources, // 傳遞來源
           author_bio,
-          author_values
+          author_values,
+          target_audience,
+          unique_angle,
+          expected_outline,
+          personal_experience
         });
         sections.push(sectionContent);
 
@@ -61,7 +73,10 @@ class ArticleService {
         style_guide,
         verifiedSources, // 傳遞來源
         author_bio,
-        author_values
+        author_values,
+        target_audience,
+        unique_angle,
+        personal_experience
       });
 
       // 保障標題與 meta 有值，避免 undefined 注入到 HTML
@@ -187,7 +202,7 @@ class ArticleService {
    * 生成引言段落
    */
   static async generateIntroduction(outline, options = {}) {
-    const { provider, style_guide, serp_data, verifiedSources: passedSources, author_bio, author_values } = options;
+    const { provider, style_guide, serp_data, verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, expected_outline, personal_experience } = options;
 
     console.log('🔍 [Librarian] 正在檢索權威來源...');
     
@@ -213,6 +228,9 @@ ${JSON.stringify(outline.introduction, null, 2)}
 ## 主要關鍵字
 ${outline.keywords?.primary || ''}
 
+## 目標受眾
+${target_audience || '一般讀者'}
+
 ## 🔍 競爭對手內容分析
 高頻關鍵詞：${topKeywords || '無數據'}
 
@@ -225,7 +243,13 @@ ${formattedSources}
 ## 👤 作者 Persona 與價值觀 (重要！)
 ${author_bio ? `- 作者背景: ${author_bio}` : ''}
 ${author_values ? `- 核心價值觀: ${author_values}` : ''}
+${unique_angle ? `- 獨特觀點/立場: ${unique_angle}` : ''}
+${personal_experience ? `- 可引用的真實經驗/案例: ${personal_experience}` : ''}
 請務必將上述作者的觀點與風格融入寫作中，確保內容具有獨特性與個人色彩。
+
+${expected_outline ? `## 期望涵蓋的大綱/重點（需呼應）
+${expected_outline}
+` : ''}
 
 ## 寫作要求
 1. **專業但誠實**：使用第三人稱或客觀描述，避免虛構個人經驗。
@@ -291,7 +315,7 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
    * 生成單一段落
    */
   static async generateSection(section, outline, options = {}) {
-    const { provider, style_guide, serp_data, internal_links, verifiedSources: passedSources, author_bio, author_values } = options;
+    const { provider, style_guide, serp_data, internal_links, verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, expected_outline, personal_experience } = options;
 
     // 🔧 兼容性處理：支援 title 或 heading
     const sectionHeading = section.heading || section.title || '未命名段落';
@@ -329,6 +353,10 @@ ${author_values ? `## 👤 作者價值觀（必須反映在內容中）
 ${author_values}
 - 每個論點、建議都要符合此價值觀，否則請刪除或改寫。
 ` : ''}
+${unique_angle ? `## 🎯 獨特觀點 / 核心立場
+- ${unique_angle}
+請在段落中多次呼應此觀點，避免泛泛而談。
+` : ''}
 ## 要寫的重點
 ${section.key_points?.join('\n- ') || ''}
 
@@ -338,6 +366,9 @@ ${subsectionsText}
 
 ## 目標字數
 約 ${section.estimated_words || 300} 字
+
+## 目標受眾
+${target_audience || '一般讀者'}
 
 ## 相關關鍵字
 主要：${outline.keywords?.primary || ''}
@@ -363,7 +394,13 @@ ${internalLinksText || '無可用內部連結'}
 ## 👤 作者 Persona 與價值觀 (重要！)
 ${author_bio ? `- 作者背景: ${author_bio}` : ''}
 ${author_values ? `- 核心價值觀: ${author_values}` : ''}
+${unique_angle ? `- 獨特觀點/角度: ${unique_angle}` : ''}
+${personal_experience ? `- 可引用的真實經驗/案例: ${personal_experience}` : ''}
 請務必將上述作者的觀點與風格融入寫作中，確保內容具有獨特性與個人色彩。
+
+${expected_outline ? `## 期望涵蓋的大綱/重點（需呼應）
+${expected_outline}
+` : ''}
 
 ## ✍️ 寫作風格約束（避免 AI 常見問題）
 1. **可讀性優先**：
@@ -600,7 +637,7 @@ ${draftHtml}
    * 生成結論段落
    */
   static async generateConclusion(outline, sections, options = {}) {
-    const { provider, style_guide, verifiedSources: passedSources, author_bio, author_values } = options;
+    const { provider, style_guide, verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, personal_experience } = options;
 
     const mainPoints = sections.map(s => s.heading).join('\n- ');
 
@@ -618,7 +655,12 @@ ${JSON.stringify(outline.conclusion, null, 2)}
 ## 👤 作者 Persona 與價值觀 (重要！)
 ${author_bio ? `- 作者背景: ${author_bio}` : ''}
 ${author_values ? `- 核心價值觀: ${author_values}` : ''}
+${unique_angle ? `- 獨特觀點/角度: ${unique_angle}` : ''}
+${personal_experience ? `- 可引用的真實經驗/案例: ${personal_experience}` : ''}
 請務必將上述作者的觀點與風格融入寫作中，確保內容具有獨特性與個人色彩。
+
+## 目標受眾
+${target_audience || '一般讀者'}
 
 ## 寫作要求
 1. 總結文章的核心要點

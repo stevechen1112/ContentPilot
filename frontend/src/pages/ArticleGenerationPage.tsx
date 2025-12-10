@@ -14,10 +14,21 @@ export default function ArticleGenerationPage() {
   const [keyword, setKeyword] = useState(searchParams.get('keyword') || '');
   const [generationStatus, setGenerationStatus] = useState('');
   const [initializing, setInitializing] = useState(true);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Advanced persona / outline controls
+  const [authorPersona, setAuthorPersona] = useState('');
+  const [authorValues, setAuthorValues] = useState('');
+  const [tone, setTone] = useState('專業但易懂');
+  const [targetAudience, setTargetAudience] = useState('一般讀者');
+  const [uniqueAngle, setUniqueAngle] = useState('');
+  const [expectedOutline, setExpectedOutline] = useState('');
+  const [personalExperience, setPersonalExperience] = useState('');
 
   // Auto-initialize project
   useEffect(() => {
     const initProject = async () => {
+      // If we already have a project, stop initializing
       if (currentProject) {
         setInitializing(false);
         return;
@@ -31,17 +42,39 @@ export default function ArticleGenerationPage() {
         if (projects.length > 0) {
           setCurrentProject(projects[0]);
         } else {
-          // Create a default project
-          const newProjectRes = await projectAPI.create({
-            name: '我的專案',
-            description: 'Default project for quick generation'
-          });
-          const newProject = newProjectRes.data.data;
-          setProjects([newProject]);
-          setCurrentProject(newProject);
+          try {
+            // Create a default project
+            const newProjectRes = await projectAPI.create({
+              name: '我的專案',
+              description: 'Default project for quick generation'
+            });
+            const newProject = newProjectRes.data.data;
+            setProjects([newProject]);
+            setCurrentProject(newProject);
+          } catch (createError) {
+            console.error('Failed to create default project:', createError);
+            // Fallback for local dev / offline mode
+            const mockProject = {
+              id: 'mock-project-id',
+              name: '示範專案 (Offline)',
+              description: 'Local fallback project',
+              created_at: new Date().toISOString()
+            };
+            setProjects([mockProject]);
+            setCurrentProject(mockProject);
+          }
         }
       } catch (error) {
         console.error('Failed to initialize project:', error);
+        // Fallback for local dev / offline mode
+        const mockProject = {
+          id: 'mock-project-id',
+          name: '示範專案 (Offline)',
+          description: 'Local fallback project',
+          created_at: new Date().toISOString()
+        };
+        setProjects([mockProject]);
+        setCurrentProject(mockProject);
       } finally {
         setInitializing(false);
       }
@@ -52,26 +85,29 @@ export default function ArticleGenerationPage() {
 
   const handleGenerateArticle = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    
+
     if (!keyword.trim()) {
       setNotification({ type: 'error', message: '請輸入關鍵字' });
       return;
     }
 
     if (!currentProject) {
-       setNotification({ type: 'error', message: '系統初始化中，請稍後再試' });
-       return;
+      setNotification({ type: 'error', message: '系統初始化中，請稍後再試' });
+      return;
     }
 
     setLoading(true);
     setGenerationStatus('正在分析關鍵字並生成大綱...');
-    
+
     try {
-      const defaultSettings = { 
-        tone: '專業但易懂', 
-        target_audience: '一般讀者',
-        author_bio: '',
-        author_values: ''
+      const defaultSettings = {
+        tone,
+        target_audience: targetAudience,
+        author_bio: authorPersona,
+        author_values: authorValues,
+        unique_angle: uniqueAngle,
+        expected_outline: expectedOutline,
+        personal_experience: personalExperience
       };
 
       const outlineRes = await articleAPI.generateOutline(keyword, currentProject.id, null, defaultSettings);
@@ -88,11 +124,11 @@ export default function ArticleGenerationPage() {
       const articleRes = await articleAPI.generate(currentProject.id, null, rawOutline, defaultSettings);
 
       setNotification({ type: 'success', message: '文章生成成功！' });
-      
+
       // 組合完整的 HTML 內容
       const article = articleRes.data.data;
       const content = article.content_draft || article.content;
-      
+
       let fullHtml = '';
       if (content?.content) {
         // 組合: 引言 + 所有章節 + 結論
@@ -113,10 +149,10 @@ export default function ArticleGenerationPage() {
           fullHtml += `<div class="conclusion">${content.content.conclusion.html}</div>`;
         }
       }
-      
+
       // 將組合的 HTML 添加到文章對象中
       article.html_content = fullHtml;
-      
+
       // 跳轉到獨立的文章詳情頁面
       const articleId = article.id;
       navigate(`/article/${articleId}`);
@@ -147,16 +183,16 @@ export default function ArticleGenerationPage() {
               <Loader2 className="w-16 h-16 text-primary-600 animate-spin" />
             </div>
           </div>
-          
+
           <div className="space-y-4">
             <h3 className="text-3xl font-bold text-gray-900">AI 正在為您撰寫</h3>
             <p className="text-xl text-gray-500">{generationStatus}</p>
           </div>
-          
+
           <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden max-w-md mx-auto">
             <div className="bg-gradient-to-r from-primary-400 to-primary-600 h-full rounded-full animate-progress" style={{ width: '100%', animationDuration: '2s' }}></div>
           </div>
-          
+
           <p className="text-sm text-gray-400">這可能需要幾分鐘，請勿關閉視窗</p>
         </div>
       ) : (
@@ -183,7 +219,7 @@ export default function ArticleGenerationPage() {
               autoFocus
             />
             <div className="absolute inset-y-0 right-0 pr-4 flex items-center">
-              <button 
+              <button
                 type="submit"
                 disabled={!keyword.trim()}
                 className="p-2 bg-primary-600 text-white rounded-full hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -192,6 +228,96 @@ export default function ArticleGenerationPage() {
               </button>
             </div>
           </form>
+
+          {/* Advanced controls */}
+          <div className="w-full max-w-3xl bg-white border border-gray-200 rounded-2xl shadow-sm p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-base font-semibold text-gray-900">進階設定</p>
+                <p className="text-sm text-gray-500">提供作者人設、受眾與獨特觀點，生成更聚焦的內容</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((v) => !v)}
+                className="text-sm text-primary-600 hover:text-primary-700"
+              >
+                {showAdvanced ? '收起' : '展開'}
+              </button>
+            </div>
+
+            {showAdvanced && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm text-gray-600">作者人設 / 背景</label>
+                  <input
+                    type="text"
+                    value={authorPersona}
+                    onChange={(e) => setAuthorPersona(e.target.value)}
+                    placeholder="例如：10 年資深營養師，強調科學實證"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm text-gray-600">核心價值觀 / 風格</label>
+                  <input
+                    type="text"
+                    value={authorValues}
+                    onChange={(e) => setAuthorValues(e.target.value)}
+                    placeholder="例如：科學、務實、可落地，避免誇大"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm text-gray-600">目標受眾</label>
+                  <input
+                    type="text"
+                    value={targetAudience}
+                    onChange={(e) => setTargetAudience(e.target.value)}
+                    placeholder="例如：投資新手、想要 3 步驟學會的上班族"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm text-gray-600">口吻 / Tone</label>
+                  <input
+                    type="text"
+                    value={tone}
+                    onChange={(e) => setTone(e.target.value)}
+                    placeholder="例如：直白、具體、行動導向"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm text-gray-600">獨特觀點 / 角度</label>
+                  <input
+                    type="text"
+                    value={uniqueAngle}
+                    onChange={(e) => setUniqueAngle(e.target.value)}
+                    placeholder="例如：只分享可驗證的技巧，不講空話"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm text-gray-600">期望大綱 / 重點</label>
+                  <textarea
+                    value={expectedOutline}
+                    onChange={(e) => setExpectedOutline(e.target.value)}
+                    placeholder="列出你想要的 H2/H3 重點，或必須涵蓋的步驟"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent min-h-[72px]"
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-sm text-gray-600">個人經驗 / 案例</label>
+                  <textarea
+                    value={personalExperience}
+                    onChange={(e) => setPersonalExperience(e.target.value)}
+                    placeholder="可加入你的真實經驗、失敗教訓、案例數據，讓內容更有深度"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent min-h-[96px]"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Quick Tags */}
           <div className="flex flex-wrap justify-center gap-3 text-sm text-gray-600">

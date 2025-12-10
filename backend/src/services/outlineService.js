@@ -15,7 +15,10 @@ class OutlineService {
         word_count = 2500,
         provider = process.env.AI_PROVIDER || 'openai',
         author_bio,
-        author_values
+        author_values,
+        unique_angle,
+        expected_outline,
+        personal_experience
       } = options;
 
       // 全面使用 Gemini
@@ -62,6 +65,9 @@ class OutlineService {
         word_count,
         author_bio,
         author_values,
+        unique_angle,
+        expected_outline,
+        personal_experience,
         provider  // 傳入 provider 以調整 prompt 長度
       });
 
@@ -166,7 +172,7 @@ class OutlineService {
    * 建構大綱生成 Prompt
    */
   static buildOutlinePrompt(keyword, serpAnalysis, competitorInsights, options) {
-    const { target_audience, tone, word_count, author_bio, author_values, provider = 'openai' } = options;
+    const { target_audience, tone, word_count, author_bio, author_values, unique_angle, expected_outline, personal_experience, provider = 'openai' } = options;
 
     // 提取 SERP 關鍵資訊 (S2)
     const topTitles = serpAnalysis.topResults?.slice(0, 5).map(r => r.title).join('\n- ') || '';
@@ -181,6 +187,21 @@ class OutlineService {
         return `競爭對手 ${index + 1} (${insight.title}):\n   - H2 架構: ${h2s}`;
       }).join('\n');
     }
+
+    const uniqueAngleText = unique_angle ? `
+  **獨特觀點（必須體現，避免農場文）**
+  - ${unique_angle}
+  ` : '';
+
+    const expectedOutlineText = expected_outline ? `
+  **期望涵蓋的大綱/重點**
+  ${expected_outline}
+  ` : '';
+
+    const experienceText = personal_experience ? `
+  **可引用的真實經驗/案例**
+  ${personal_experience}
+  ` : '';
 
     // OpenAI 簡化版 Prompt (節省 token)
     if (provider === 'openai') {
@@ -206,6 +227,10 @@ ${topTitles}
 
 **讀者痛點（FAQ）**
 ${peopleAlsoAsk}
+
+${uniqueAngleText}
+${expectedOutlineText}
+${experienceText}
 
 **結構約束（SCQA 必須明確對應 H2）**
 1. 引言：S（現狀）+ C（衝突/問題）
