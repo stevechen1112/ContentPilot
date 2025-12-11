@@ -52,12 +52,43 @@ class AuthoritySourceService {
       'pixnet.net', 'xuite.net', 'blogspot.com', 'wordpress.com',
       'dailyheadlines.cc', 'twgreatdaily.com',
       'ppg.ly.gov.tw', // 立法院公報 (通常是會議記錄，非教學內容)
-      'gazette.nat.gov.tw' // 政府公報 (同上)
+      'gazette.nat.gov.tw', // 政府公報 (同上)
+      // 電商平台 (避免抓取商品頁)
+      'books.com.tw', 'kingstone.com.tw', 'eslite.com', 
+      'shopee.tw', 'momoshop.com.tw', 'pchome.com.tw', 'rakuten.com.tw',
+      'ruten.com.tw', 'yahoo.com'
     ];
     
     const isBlocked = blockedDomains.some(d => parsedUrl.hostname.includes(d));
     if (isBlocked) {
-      return { valid: false, reason: '網域在黑名單中（內容農場、部落格平台或原始公報）' };
+      return { valid: false, reason: '網域在黑名單中（內容農場、部落格平台、電商或原始公報）' };
+    }
+
+    // 檢查6: URL路徑黑名單（過濾目錄、清單、索引等非實質內容）
+    const blockedPathPatterns = [
+      /\/filedownload\//i,     // 文件下載頁面（通常是PDF/書目）
+      /\/download\//i,          // 下載頁面
+      /\/catalog\//i,           // 目錄頁
+      /\/index\//i,             // 索引頁
+      /\/list\//i,              // 列表頁
+      /\/search\?/i,            // 搜尋結果頁
+      /\/category\//i,          // 分類頁
+      /\/tag\//i,               // 標籤頁
+      /\/archive\//i,           // 檔案庫頁
+      /bookDetail\.do/i,        // 圖書詳情頁（通常只有書目資訊）
+      /\/products\//i,          // 產品頁
+      /\/product\//i,
+      /\/goods\//i,
+      /\/item\//i,
+      /\/shop\//i,
+      /\/store\//i,
+      /\/cart\//i,
+      /\/checkout\//i
+    ];
+
+    const hasBlockedPath = blockedPathPatterns.some(pattern => pattern.test(url));
+    if (hasBlockedPath) {
+      return { valid: false, reason: '頁面類型不適合（目錄/清單/索引頁）' };
     }
 
     return { valid: true };
@@ -68,6 +99,11 @@ class AuthoritySourceService {
    */
   static async validateUrlAccessibility(url, timeout = 5000) {
     try {
+      // 🆕 檢測PDF文件並拒絕處理（避免抓取二進制內容）
+      if (url.toLowerCase().endsWith('.pdf')) {
+        return { accessible: false, reason: 'PDF文件暫不支持（需要專門的解析器）' };
+      }
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
 
@@ -82,6 +118,12 @@ class AuthoritySourceService {
       });
 
       clearTimeout(timeoutId);
+
+      // 🆕 檢查Content-Type是否為PDF
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/pdf')) {
+        return { accessible: false, reason: 'PDF文件暫不支持（需要專門的解析器）' };
+      }
 
       if (response.status >= 200 && response.status < 400) {
         // 🆕 Soft 404 檢測：檢查內容是否包含錯誤訊息
@@ -99,7 +141,11 @@ class AuthoritySourceService {
 
         // 🆕 成功獲取內容，返回給調用者以便進一步分析 (Deep Reading)
         // 簡單清理 HTML 標籤，只保留文字
-        const plainText = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 1500);
+        // 先移除 script 和 style 標籤及其內容
+        let cleanText = text.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gim, "")
+                            .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gim, "");
+        // 再移除其他 HTML 標籤
+        const plainText = cleanText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 1500);
 
         return { 
           accessible: true, 
@@ -147,6 +193,48 @@ class AuthoritySourceService {
         ? `匹配${matchedTokens.length}/${keywordTokens.length}個關鍵詞` 
         : `僅匹配${matchedTokens.length}/${keywordTokens.length}個關鍵詞（需至少30%）`
     };
+  }
+
+  /**
+   * 📋 P4: 來源品質驗證層（過濾目錄、清單等非實質內容）
+   */
+  static validateSourceQuality(source) {
+    const title = (source.title || '').toLowerCase();
+    const snippet = (source.snippet || '').toLowerCase();
+    
+    // 標題黑名單：明顯的非實質內容標記
+    const blockedTitleKeywords = [
+      '年度新書', '新書目錄', '書目', '圖書清單', '館藏',
+      '第\\d+批', '批次', 'filedownload', 'download',
+      '索引', '目錄', '清單列表', '資料庫',
+      '搜尋結果', '查詢結果', '檢索',
+      '404', 'not found', 'page not found',
+      // 電商與促銷關鍵詞
+      '買一送一', '折起', '特價', '優惠', '團購', 
+      '購物車', '加入會員', '立即購買', '售價', '價格'
+    ];
+
+    const hasBlockedKeyword = blockedTitleKeywords.some(keyword => {
+      const pattern = new RegExp(keyword, 'i');
+      return pattern.test(title);
+    });
+
+    if (hasBlockedKeyword) {
+      return { 
+        valid: false, 
+        reason: '標題包含非實質內容關鍵詞（目錄/清單/索引）' 
+      };
+    }
+
+    // 檢查摘要是否過短（可能是無效頁面）
+    if (snippet.length < 20) {
+      return { 
+        valid: false, 
+        reason: '摘要過短，可能是無效頁面' 
+      };
+    }
+
+    return { valid: true };
   }
 
   /**
@@ -375,6 +463,13 @@ ${keyword}
       } else {
         // console.log(`✅ [P3相關性] ${source.title?.substring(0, 40)}... - ${relevanceValidation.reason}`);
         source.relevancePenalty = 0;
+      }
+
+      // P4: 來源品質驗證（過濾目錄、清單等非實質內容）
+      const qualityValidation = this.validateSourceQuality(source);
+      if (!qualityValidation.valid) {
+        // console.log(`❌ [P4品質] ${source.title?.substring(0, 40)}... - ${qualityValidation.reason}`);
+        continue; // 直接跳過低品質來源
       }
       
       seenUrls.add(source.url);

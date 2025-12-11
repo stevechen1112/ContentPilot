@@ -57,13 +57,14 @@ class ArticleController {
         return res.status(400).json({ error: 'Outline is required' });
       }
 
-      // POC 模式：如果沒有 project_id，自動建立一個預設專案
+      // POC 模式：如果沒有 project_id，自動建立一個預設專案（使用固定 UUID 避免類型錯誤）
       if (!project_id) {
+        const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
         try {
           const defaultProject = await ProjectModel.create({
             name: '快速生成',
             description: 'Auto-created for quick generation',
-            user_id: 'demo-user', // 確保這裡的 user_id 與資料庫相容
+            user_id: DEFAULT_USER_ID,
             niche: 'general',
             target_audience: target_audience || '一般讀者'
           });
@@ -76,11 +77,10 @@ class ArticleController {
           project_id = defaultProject.id;
         } catch (dbError) {
           console.error('Database error in project creation:', dbError);
-          // 嘗試查找現有的 demo-user 專案作為 fallback
-          const projects = await ProjectModel.findByUserId('demo-user');
+          // 嘗試查找現有的預設專案作為 fallback
+          const projects = await ProjectModel.findByUserId(DEFAULT_USER_ID);
           if (projects && projects.length > 0) {
             project_id = projects[0].id;
-            console.log('Using existing project as fallback:', project_id);
           } else {
             return res.status(500).json({ error: 'System initialization failed: Cannot create project' });
           }

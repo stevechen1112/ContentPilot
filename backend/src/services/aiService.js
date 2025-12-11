@@ -79,13 +79,8 @@ class AIService {
    * 通用 AI 呼叫（支援 Gemini 和 OpenAI）
    */
   static async generate(prompt, options = {}) {
-    const provider = process.env.AI_PROVIDER || 'openai';
-    
-    if (provider === 'openai') {
-      return await this.callOpenAI(prompt, options);
-    } else {
-      return await this.callGemini(prompt, options);
-    }
+    // 強制只走 OpenAI（避免意外觸發 Gemini）
+    return await this.callOpenAI(prompt, options);
   }
 
   /**
@@ -97,21 +92,31 @@ class AIService {
         model = process.env.OPENAI_MODEL || 'gpt-5-mini',
         temperature = parseFloat(process.env.OPENAI_TEMPERATURE) || 0.7,
         max_tokens = parseInt(process.env.OPENAI_MAX_TOKENS) || 4096,
-        system = null
+        system = null,
+        response_format = null
       } = options;
 
       const client = getOpenAIClient();
+
+      // 防禦：確保 prompt 為非空字串
+      const safePrompt = (typeof prompt === 'string' && prompt.trim().length > 0)
+        ? prompt
+        : '請產生一份文章大綱（台灣繁體中文）。';
       
       const messages = [];
       if (system) {
         messages.push({ role: 'system', content: system });
       }
-      messages.push({ role: 'user', content: prompt });
+      messages.push({ role: 'user', content: safePrompt });
 
       const requestParams = {
         model,
         messages
       };
+
+      if (response_format) {
+        requestParams.response_format = response_format;
+      }
 
       // gpt-5 系列限制
       if (model.startsWith('gpt-5')) {

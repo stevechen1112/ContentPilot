@@ -16,6 +16,33 @@ export default function ArticleGenerationPage() {
   const [initializing, setInitializing] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Outline telemetry for SERP coverage & sources
+  const [outlineInfo, setOutlineInfo] = useState<{
+    coverage?: any;
+    sections?: any[];
+  } | null>(null);
+
+  const summarizeSources = (sections?: any[]) => {
+    if (!Array.isArray(sections)) return [];
+    const map = new Map<string, any>();
+
+    sections.forEach((section) => {
+      const allSources = [
+        ...(section.sources || []),
+        ...((section.subsections || []).flatMap((sub: any) => sub.sources || []))
+      ];
+
+      allSources.forEach((src: any) => {
+        if (!src?.link) return;
+        const existing = map.get(src.link) || { ...src, count: 0 };
+        existing.count += 1;
+        map.set(src.link, existing);
+      });
+    });
+
+    return Array.from(map.values()).sort((a, b) => (a.position || 99) - (b.position || 99)).slice(0, 5);
+  };
+
   // Advanced persona / outline controls
   const [authorPersona, setAuthorPersona] = useState('');
   const [authorValues, setAuthorValues] = useState('');
@@ -28,7 +55,7 @@ export default function ArticleGenerationPage() {
   // Auto-initialize project
   useEffect(() => {
     const initProject = async () => {
-      // If we already have a project, stop initializing
+      // If we already have a current project, don't do anything
       if (currentProject) {
         setInitializing(false);
         return;
@@ -53,28 +80,14 @@ export default function ArticleGenerationPage() {
             setCurrentProject(newProject);
           } catch (createError) {
             console.error('Failed to create default project:', createError);
-            // Fallback for local dev / offline mode
-            const mockProject = {
-              id: 'mock-project-id',
-              name: '示範專案 (Offline)',
-              description: 'Local fallback project',
-              created_at: new Date().toISOString()
-            };
-            setProjects([mockProject]);
-            setCurrentProject(mockProject);
+            throw createError;
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Failed to initialize project:', error);
-        // Fallback for local dev / offline mode
-        const mockProject = {
-          id: 'mock-project-id',
-          name: '示範專案 (Offline)',
-          description: 'Local fallback project',
-          created_at: new Date().toISOString()
-        };
-        setProjects([mockProject]);
-        setCurrentProject(mockProject);
+        if (error.response?.status === 401 || error.status === 401) {
+          console.error('Authentication check failed. User might need to login.');
+        }
       } finally {
         setInitializing(false);
       }
@@ -82,6 +95,8 @@ export default function ArticleGenerationPage() {
 
     initProject();
   }, [currentProject, setCurrentProject, setProjects]);
+
+
 
   const handleGenerateArticle = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -97,6 +112,7 @@ export default function ArticleGenerationPage() {
     }
 
     setLoading(true);
+    setOutlineInfo(null);
     setGenerationStatus('正在分析 Google 搜尋結果與競爭對手...');
 
     try {
@@ -125,6 +141,12 @@ export default function ArticleGenerationPage() {
       setGenerationStatus('正在根據 SERP 資料與您的獨特觀點生成大綱...');
       const outlineRes = await articleAPI.generateOutline(keyword, currentProject.id, serpData, defaultSettings);
       const rawOutline = outlineRes.data.data;
+
+      // 捕捉 SERP 覆蓋率與來源供前端展示
+      setOutlineInfo({
+        coverage: rawOutline?.serp_coverage,
+        sections: rawOutline?.sections
+      });
 
       if (!rawOutline || rawOutline.parse_error) {
         setNotification({ type: 'error', message: '大綱解析失敗，請重試' });
@@ -178,6 +200,8 @@ export default function ArticleGenerationPage() {
     }
   };
 
+  const topSources = summarizeSources(outlineInfo?.sections);
+
   if (initializing) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
@@ -207,6 +231,42 @@ export default function ArticleGenerationPage() {
           </div>
 
           <p className="text-sm text-gray-400">這可能需要幾分鐘，請勿關閉視窗</p>
+
+          {outlineInfo && (
+            <div className="text-left bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">SERP 覆蓋度</p>
+                <p className="text-xs text-gray-500">PAA / 前 5 名結果映射到大綱</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm text-gray-700">
+                <div className="bg-white border border-gray-200 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">PAA 覆蓋</p>
+                  <p className="font-semibold">{outlineInfo.coverage?.paa?.covered || 0} / {outlineInfo.coverage?.paa?.total || 0}</p>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">前 5 名標題覆蓋</p>
+                  <p className="font-semibold">{outlineInfo.coverage?.top_results?.covered || 0} / {outlineInfo.coverage?.top_results?.total || 0}</p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-gray-900">可能參考的權威來源</p>
+                <ul className="space-y-1 text-sm text-gray-700">
+                  {topSources.map((src) => (
+                    <li key={src.link} className="flex items-start gap-2">
+                      <span className="text-primary-600 font-semibold">#{src.position || '-'} </span>
+                      <a href={src.link} className="hover:text-primary-700 underline" target="_blank" rel="noreferrer">
+                        {src.title}
+                      </a>
+                    </li>
+                  ))}
+                  {topSources.length === 0 && (
+                    <li className="text-xs text-gray-500">暫無來源資料</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="w-full max-w-3xl flex flex-col items-center space-y-8 animate-fade-in-up">

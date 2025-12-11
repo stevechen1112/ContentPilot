@@ -13,7 +13,7 @@ class OutlineService {
         target_audience = '一般讀者',
         tone = '專業但易懂',
         word_count = 2500,
-        provider = process.env.AI_PROVIDER || 'openai',
+        provider = 'openai', // 強制使用 OpenAI (因 Gemini 不穩定)
         author_bio,
         author_values,
         unique_angle,
@@ -37,19 +37,19 @@ class OutlineService {
         console.log('   [S3] 正在執行競爭對手深度分析 (Competitor Analysis)...');
         // 取前 3 名高品質結果進行爬取
         const topUrls = serp_data.topResults.slice(0, 3).map(r => r.link);
-        
+
         try {
           // 並行爬取，但限制錯誤不影響主流程
-          const analysisPromises = topUrls.map(url => 
+          const analysisPromises = topUrls.map(url =>
             CompetitorAnalysisService.analyzeCompetitorContent(url)
-              .then(result => ({ 
-                url, 
+              .then(result => ({
+                url,
                 title: serp_data.topResults.find(r => r.link === url)?.title,
-                structure: result.structure 
+                structure: result.structure
               }))
               .catch(err => null) // 忽略單一失敗
           );
-          
+
           const results = await Promise.all(analysisPromises);
           competitorInsights = results.filter(r => r !== null);
           console.log(`   [S3] 完成 ${competitorInsights.length} 個競爭對手分析`);
@@ -69,7 +69,7 @@ class OutlineService {
         expected_outline,
         personal_experience,
         provider  // 傳入 provider 以調整 prompt 長度
-      });
+      }) || `請為關鍵字「${keyword}」產生一份含 H2/H3 的文章大綱（台灣繁體中文）`;
 
       // 定義大綱的 JSON Schema（用於 Gemini 3 結構化輸出）
       const outlineSchema = {
@@ -139,6 +139,9 @@ class OutlineService {
       // Gemini 支援結構化輸出，OpenAI 使用純文字 JSON
       if (provider === 'gemini') {
         aiOptions.responseSchema = outlineSchema;
+      } else {
+        // OpenAI 強制 JSON 模式
+        aiOptions.response_format = { type: "json_object" };
       }
 
       const result = await AIService.generate(prompt, aiOptions);
@@ -146,15 +149,24 @@ class OutlineService {
       // 解析 AI 回應（假設返回 JSON 格式）
       const outline = this.parseOutlineResponse(result.content);
 
+      // 🆕 附加 SERP 來源與覆蓋率指標（PAA/Top Results -> H2/H3 映射）
+      const sectionsWithSources = this.attachSourcesToSections(outline.sections || [], serpAnalysis.topResults || []);
+      const serpCoverage = this.computeSerpCoverage({
+        sections: sectionsWithSources,
+        serpAnalysis
+      });
+
       // 🔧 修復：直接返回 outline 的內容，避免多層嵌套
       return {
         ...outline,  // 展開 outline 的所有屬性（title, sections, keywords 等）
+        sections: sectionsWithSources,
         keyword,
         serp_insights: {
           total_results: serpAnalysis.totalResults,
           people_also_ask: serpAnalysis.peopleAlsoAsk?.slice(0, 5) || [],
           related_searches: serpAnalysis.relatedSearches?.slice(0, 5) || []
         },
+        serp_coverage: serpCoverage,
         metadata: {
           target_audience,
           tone,
@@ -207,7 +219,7 @@ class OutlineService {
     if (provider === 'openai') {
       const targetSections = Math.min(Math.max(Math.ceil(word_count / 600), 4), 5); // 4-5個章節
       const wordsPerSection = Math.floor((word_count - 400) / targetSections); // 扣除前言+結論
-      
+
       return `你是專業 SEO 策劃師，為「${keyword}」設計文章大綱。
 
 **嚴格限制**
@@ -235,9 +247,11 @@ ${experienceText}
 **結構約束（SCQA 必須明確對應 H2）**
 1. 引言：S（現狀）+ C（衝突/問題）
 2. H2-1：Q（核心問題）—— 標題需含問句或痛點關鍵字
-3. H2-2 至 H2-${targetSections-1}：A（解答/方法）—— 每個 H2 對應一個主要解決方案
+3. H2-2 至 H2-${targetSections - 1}：A（解答/方法）—— 每個 H2 對應一個主要解決方案
 4. H2-${targetSections}：結論與行動呼籲
 5. 每個 H2 下必須有 1-2 個 H3 子標題（不超過2個），形成完整層級。
+6. **PAA 整合**：必須將 PAA (People Also Ask) 的前 3 題融入 H2/H3 標題。
+7. **實證要求**：每個 H2 需提及具體案例或數據。
 
 **標題要求**
 - H2 標題需含語意化關鍵字（如「${keyword}」的變形詞）
@@ -299,14 +313,12 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
 3. **Question (問題)**: 明確提出本文要解決的核心問題。
 4. **Answer (答案)**: 透過文章的主體段落提供完整的解決方案。
 
-## 其他注意事項
-1. 標題需符合 SEO 最佳實踐（包含關鍵字、60字以內）
-2. 結構需涵蓋使用者搜尋意圖（informational, navigational, transactional）
-3. 每個 section 需有明確的價值，避免空洞內容
-5. 回答 People Also Ask 的問題
-6. 確保內容符合 E-E-A-T 原則（經驗、專業、權威、信任）
-7. 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容
-8. **重要**：標題文字請直接撰寫，不要加「H2:」或「H3:」等前綴標記
+## 強制執行要求 (Mandatory)
+1. **PAA 覆蓋 (重要)**：請務必將上方提供的「使用者常見問題 (People Also Ask)」前 3 題，改寫並自然融入 H2 或 H3 標題中，確保大綱能直接回答讀者疑問。
+2. **實證數據**：每個 H2 章節必須規劃至少一個具體案例、數據引用或權威來源的佔位符，避免空泛論述。
+3. **語意變體**：H2/H3 標題請使用關鍵字「${keyword}」的同義詞或變體，提高內容豐富度。
+4. 標題文字請直接撰寫，不要加「H2:」或「H3:」等前綴標記。
+5. 確保內容符合 E-E-A-T 原則 (經驗、專業、權威、信任)。
 
 ## 輸出格式
 請**只輸出**符合以下 JSON 結構的大綱，不要包含任何其他文字或說明：
@@ -338,9 +350,104 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
 }
 \`\`\`
 
-請立即產生上述 JSON 格式的完整大綱，不要有其他任何說明文字。`;
+請直接輸出 JSON，不要有其他說明文字。`;
+  }
 
-    return prompt;
+  /**
+   * 為每個章節附加可能參考的 SERP 來源（根據標題關鍵詞重疊）
+   */
+  static attachSourcesToSections(sections, topResults) {
+    if (!Array.isArray(sections) || !Array.isArray(topResults)) return sections;
+
+    const pickSources = (headingTokens) => {
+      const matches = [];
+      for (const result of topResults) {
+        if (!result?.title || !result?.link) continue;
+        const titleTokens = this.tokenize(result.title);
+        if (this.hasTokenOverlap(headingTokens, titleTokens)) {
+          matches.push({
+            title: result.title,
+            link: result.link,
+            position: result.position
+          });
+        }
+        if (matches.length >= 3) break; // 限制最多 3 個來源
+      }
+      return matches;
+    };
+
+    return sections.map((section) => {
+      const headingTokens = this.tokenize(section.heading || section.title || '');
+      const sectionSources = pickSources(headingTokens);
+
+      const subsections = (section.subsections || []).map((sub) => {
+        const subTokens = this.tokenize(sub.heading || sub.title || '');
+        const subSources = pickSources(subTokens);
+        return { ...sub, sources: subSources };
+      });
+
+      return {
+        ...section,
+        sources: sectionSources,
+        subsections
+      };
+    });
+  }
+
+  /**
+   * 計算 SERP 覆蓋率（PAA & Top Results 映射到 H2/H3）
+   */
+  static computeSerpCoverage({ sections, serpAnalysis = {} }) {
+    const headings = this.collectHeadings(sections);
+
+    const coverCount = (items = [], extractor) => {
+      let covered = 0;
+      const matched = [];
+      for (const item of items) {
+        const text = extractor(item);
+        const tokens = this.tokenize(text);
+        const hit = headings.some((h) => this.hasTokenOverlap(tokens, h.tokens));
+        if (hit) {
+          covered += 1;
+          matched.push(text);
+        }
+      }
+      return { covered, total: items.length, matched };
+    };
+
+    const paaCoverage = coverCount(serpAnalysis.peopleAlsoAsk || [], (q) => q.question || '');
+    const topCoverage = coverCount(serpAnalysis.topResults || [], (r) => r.title || '');
+
+    return {
+      paa: paaCoverage,
+      top_results: topCoverage
+    };
+  }
+
+  static collectHeadings(sections = []) {
+    const result = [];
+    sections.forEach((section) => {
+      const secTokens = this.tokenize(section.heading || section.title || '');
+      result.push({ text: section.heading || section.title || '', tokens: secTokens });
+      (section.subsections || []).forEach((sub) => {
+        const subTokens = this.tokenize(sub.heading || sub.title || '');
+        result.push({ text: sub.heading || sub.title || '', tokens: subTokens });
+      });
+    });
+    return result;
+  }
+
+  static tokenize(text) {
+    return (text || '')
+      .toLowerCase()
+      .split(/[^a-z0-9\u4e00-\u9fff]+/)
+      .filter((t) => t.length >= 2);
+  }
+
+  static hasTokenOverlap(tokensA, tokensB) {
+    if (!tokensA || !tokensB || tokensA.length === 0 || tokensB.length === 0) return false;
+    const setA = new Set(tokensA);
+    return tokensB.some((t) => setA.has(t));
   }
 
   /**
@@ -351,10 +458,10 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
       // 移除可能的 markdown code block 標記
       let cleanContent = content.trim();
 
-      if (cleanContent.startsWith('```json')) {
-        cleanContent = cleanContent.replace(/```json\n?/g, '').replace(/```\n?$/g, '');
-      } else if (cleanContent.startsWith('```')) {
-        cleanContent = cleanContent.replace(/```\n?/g, '');
+      // 優先提取 Markdown Code Block 內的內容
+      const jsonBlockMatch = cleanContent.match(/```json\s*([\s\S]*?)\s*```/) || cleanContent.match(/```\s*([\s\S]*?)\s*```/);
+      if (jsonBlockMatch) {
+        cleanContent = jsonBlockMatch[1];
       }
 
       // 移除思考過程標記（DeepSeek/GPT-OSS 常見）
@@ -371,7 +478,7 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
       // 🔧 嘗試修復常見的 JSON 格式錯誤
       // 1. 移除尾部多餘的逗號 (Trailing commas)
       cleanContent = cleanContent.replace(/,(\s*[}\]])/g, '$1');
-      
+
       // 2. 嘗試修復未閉合的引號 (這比較難，但可以處理簡單情況)
       // cleanContent = cleanContent.replace(/([^\\])"\s*\n/g, '$1",\n'); 
 
@@ -380,29 +487,29 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
         parsed = JSON.parse(cleanContent);
       } catch (jsonError) {
         console.warn('⚠️ JSON parse failed, attempting to repair...');
-        
+
         // 🔧 進階修復：嘗試使用 dirty-json 邏輯或正則表達式修復截斷的 JSON
         // 如果 JSON 被截斷（通常發生在 max_tokens 不足時），嘗試補全
         if (cleanContent.lastIndexOf('}') < cleanContent.lastIndexOf('{')) {
-           cleanContent += '}]}'; // 嘗試補全結構
+          cleanContent += '}]}'; // 嘗試補全結構
         } else if (cleanContent.lastIndexOf(']') < cleanContent.lastIndexOf('[')) {
-           cleanContent += ']';
+          cleanContent += ']';
         }
 
         try {
-            // 再次嘗試解析
-            cleanContent = cleanContent.replace(/[\u0000-\u001F]+/g, '');
-            parsed = JSON.parse(cleanContent);
+          // 再次嘗試解析
+          cleanContent = cleanContent.replace(/[\u0000-\u001F]+/g, '');
+          parsed = JSON.parse(cleanContent);
         } catch (e2) {
-            console.error('❌ JSON repair failed:', e2.message);
-            // 最後手段：返回一個最小可行的大綱結構，避免程式崩潰
-            return {
-                title: "生成失敗，請重試",
-                introduction: { hook: "", context: "", thesis: "" },
-                sections: [],
-                keywords: { primary: "", secondary: [] },
-                parse_error: true
-            };
+          console.error('❌ JSON repair failed:', e2.message);
+          // 最後手段：返回一個最小可行的大綱結構，避免程式崩潰
+          return {
+            title: "生成失敗，請重試",
+            introduction: { hook: "", context: "", thesis: "" },
+            sections: [],
+            keywords: { primary: "", secondary: [] },
+            parse_error: true
+          };
         }
       }
 

@@ -26,7 +26,7 @@ Google 風格的極簡文章生成工具 - 輸入關鍵字，自動生成完整 
 2. **初始化資料庫**
    ```bash
    # 連接到 PostgreSQL 容器
-   docker exec -i contentpilot-postgres psql -U postgres -d contentpilot_dev < backend/schema.sql
+   docker exec -i contentpilot-postgres psql -U postgres -d contentpilot_dev < backend/src/models/schema.sql
    ```
 
 3. **配置環境變數**
@@ -171,69 +171,20 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5433/contentpilot_dev
 7.  **S7 格式輸出**: 生成標準 HTML，包含 Meta Description 與引用連結。
 8.  **S8 經驗補強**: 檢測並引導補充真實經驗。
 
-## ⚡ 快速開始
+## 🧪 測試與開發
 
-### 1. 環境準備
-- Node.js (v18+)
-- Google Gemini API Key
-- Serper.dev API Key
+專案包含用於測試文章生成的 CLI 工具，位於 `backend/scripts/` 目錄下：
 
-### 2. 安裝依賴
+### 文章生成測試
+此腳本可模擬完整生成流程（不依賴前端），並產出 JSON 與 HTML 檔案。
 
-```bash
-# 安裝後端依賴
-cd backend
-npm install
-
-# 安裝前端依賴
-cd ../frontend
-npm install
-```
-
-### 3. 設定環境變數
-
-請參考 `.env.example` 建立 `.env` 檔案：
-
-**Backend (`backend/.env`)**:
-```env
-PORT=3000
-# AI Configuration
-GOOGLE_GEMINI_API_KEY=your_gemini_key
-GOOGLE_GEMINI_MODEL=gemini-3-pro-preview
-
-# Search Configuration
-SERPER_API_KEY=your_serper_key
-
-# Database (Optional for local dev if using mock)
-POSTGRES_HOST=localhost
-...
-```
-
-### 4. 啟動專案
-
-**啟動後端**:
 ```bash
 cd backend
-npm start
-# 或使用開發模式
-npm run dev
+node scripts/generate_article.js
 ```
 
-**啟動前端**:
-```bash
-cd frontend
-npm run dev
-```
-
-前端預設運行於 `http://localhost:5173`，後端 API 運行於 `http://localhost:3000`。
-
-## 🧪 測試腳本
-
-專案包含多個測試腳本，位於 `backend/` 目錄下：
-
-- `node test-gemini-only.js`: 測試單篇 Gemini 文章生成流程。
-- `node batch-generate-articles.js`: 批量生成文章測試。
-- `node generate-real-article.js`: 生成真實完整的 HTML 文章檔案。
+- **輸出位置**: `backend/generated_articles/`
+- **配置方式**: 直接編輯 `scripts/generate_article.js` 中的 `keyword` 與 `tone` 等變數。
 
 ## 🚀 生產環境部署
 
@@ -277,7 +228,7 @@ npm run dev
 
 4. **初始化資料庫**
    ```bash
-   docker exec -i contentpilot-postgres psql -U postgres -d contentpilot_dev < backend/schema.sql
+   docker exec -i contentpilot-postgres psql -U postgres -d contentpilot_dev < backend/src/models/schema.sql
    ```
 
 5. **配置環境變數**
