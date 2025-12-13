@@ -97,27 +97,44 @@ class AuthoritySourceService {
   /**
    * 🌐 P2: URL可訪問性驗證層
    */
-  static async validateUrlAccessibility(url, timeout = 5000) {
+  static async validateUrlAccessibility(url, timeout = Number(process.env.URL_VALIDATE_TIMEOUT_MS || 12000)) {
     try {
+      const minTextLength = Number(process.env.URL_VALIDATE_MIN_TEXT_LEN || 200);
+
       // 🆕 檢測PDF文件並拒絕處理（避免抓取二進制內容）
       if (url.toLowerCase().endsWith('.pdf')) {
         return { accessible: false, reason: 'PDF文件暫不支持（需要專門的解析器）' };
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-      // 改用 GET 請求以獲取內容進行 Soft 404 檢測
-      const response = await fetch(url, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: { 
-          'User-Agent': 'ContentPilot-Validator/1.0',
-          'Accept': 'text/html,application/xhtml+xml'
+      const attemptFetch = async (attemptTimeout) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), attemptTimeout);
+        try {
+          const response = await fetch(url, {
+            method: 'GET',
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'ContentPilot-Validator/1.0',
+              'Accept': 'text/html,application/xhtml+xml'
+            }
+          });
+          return response;
+        } finally {
+          clearTimeout(timeoutId);
         }
-      });
+      };
 
-      clearTimeout(timeoutId);
+      let response;
+      try {
+        response = await attemptFetch(timeout);
+      } catch (error) {
+        // 品質優先：若是 timeout/網路波動，允許一次加長重試
+        const code = error.code;
+        const retryable = error.name === 'AbortError' || ['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'ENOTFOUND'].includes(code);
+        if (!retryable) throw error;
+        await new Promise(resolve => setTimeout(resolve, 500));
+        response = await attemptFetch(Math.min(timeout * 2, 25000));
+      }
 
       // 🆕 檢查Content-Type是否為PDF
       const contentType = response.headers.get('content-type');
@@ -147,6 +164,11 @@ class AuthoritySourceService {
         // 再移除其他 HTML 標籤
         const plainText = cleanText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 1500);
 
+        // 🆕 內容過短通常代表：被擋/跳轉到同意頁/空殼頁，對生成沒有幫助
+        if (plainText.length < minTextLength) {
+          return { accessible: false, reason: `內容過短（${plainText.length}字），可能是空頁或被擋` };
+        }
+
         return { 
           accessible: true, 
           status: response.status,
@@ -156,7 +178,7 @@ class AuthoritySourceService {
       return { accessible: false, reason: `HTTP ${response.status}` };
     } catch (error) {
       if (error.name === 'AbortError') {
-        return { accessible: false, reason: '請求超時（5秒）' };
+        return { accessible: false, reason: `請求超時（${timeout}ms）` };
       }
       return { accessible: false, reason: error.message };
     }
@@ -205,6 +227,9 @@ class AuthoritySourceService {
     // 標題黑名單：明顯的非實質內容標記
     const blockedTitleKeywords = [
       '年度新書', '新書目錄', '書目', '圖書清單', '館藏',
+      // 書單/清單/推薦文（常見低可信、非一手資料）
+      '書單', '推薦書', '推薦.*書', '必讀', '必看', '懶人包', '清單', '排行榜',
+      'top\\s*\\d+', '\\d+本',
       '第\\d+批', '批次', 'filedownload', 'download',
       '索引', '目錄', '清單列表', '資料庫',
       '搜尋結果', '查詢結果', '檢索',

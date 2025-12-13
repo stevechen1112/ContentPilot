@@ -53,8 +53,38 @@ class ArticleController {
     try {
       let { project_id, keyword_id, outline, serp_data, tone, target_audience, author_bio, author_values, unique_angle, expected_outline, personal_experience } = req.body;
 
+      const skipDb = String(process.env.SKIP_DB || '').trim().toLowerCase() === 'true';
+
       if (!outline) {
         return res.status(400).json({ error: 'Outline is required' });
+      }
+
+      // POC/Local mode: allow generation without database persistence
+      if (skipDb) {
+        const article = await ArticleService.generateArticle(outline, {
+          serp_data,
+          style_guide: tone ? { tone } : undefined,
+          target_audience,
+          author_bio,
+          author_values,
+          unique_angle,
+          expected_outline,
+          personal_experience
+        });
+
+        const cleanArticle = JSON.parse(JSON.stringify(article).replace(/\\u0000/g, ''));
+
+        return res.json({
+          message: 'Article generated successfully (SKIP_DB=true, not persisted)',
+          data: {
+            article_id: 'local-preview',
+            project_id: project_id || 'local-preview',
+            keyword_id: keyword_id || null,
+            title: cleanArticle.title,
+            content_draft: cleanArticle,
+            content: cleanArticle
+          }
+        });
       }
 
       // POC 模式：如果沒有 project_id，自動建立一個預設專案（使用固定 UUID 避免類型錯誤）

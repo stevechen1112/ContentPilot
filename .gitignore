@@ -28,6 +28,11 @@ build/
 *.local
 
 # ================================
+# Generated content artifacts (keep locally/Linode, not in Git)
+# ================================
+backend/generated_articles/
+
+# ================================
 # Python
 # ================================
 __pycache__/

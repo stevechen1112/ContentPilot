@@ -2,8 +2,19 @@ const { Pool } = require('pg');
 const mongoose = require('mongoose');
 const { createClient } = require('redis');
 
+const isTruthy = (value) => {
+  if (value === undefined || value === null) return false;
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'y';
+};
+
+const shouldSkipDb = isTruthy(process.env.SKIP_DB);
+const shouldRequireDb =
+  isTruthy(process.env.REQUIRE_DB) || (!('REQUIRE_DB' in process.env) && process.env.NODE_ENV === 'production');
+
 // PostgreSQL Configuration
 const pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
   host: process.env.POSTGRES_HOST || 'localhost',
   port: process.env.POSTGRES_PORT || 5432,
   database: process.env.POSTGRES_DB || 'contentpilot_dev',
@@ -12,31 +23,62 @@ const pgPool = new Pool({
 });
 
 // Redis Client
-const redisClient = createClient({
-  url: `redis://${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`
-});
+const redisUrl = process.env.REDIS_URL || `redis://${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`;
+const redisClient = createClient({ url: redisUrl });
 
 redisClient.on('error', (err) => console.error('Redis Client Error', err));
 
 const connectDB = async () => {
-  try {
-    // 1. Connect to MongoDB
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log('✅ MongoDB Connected');
+  if (shouldSkipDb) {
+    console.warn('⚠️  SKIP_DB=true: database connections are disabled');
+    return { pgPool, redisClient };
+  }
 
-    // 2. Connect to PostgreSQL
+  const errors = [];
+
+  // 1. Connect to MongoDB (optional if URI missing)
+  if (process.env.MONGODB_URI) {
+    try {
+      await mongoose.connect(process.env.MONGODB_URI);
+      console.log('✅ MongoDB Connected');
+    } catch (error) {
+      errors.push({ name: 'MongoDB', error });
+    }
+  } else {
+    console.warn('⚠️  MONGODB_URI not set: skipping MongoDB');
+  }
+
+  // 2. Connect to PostgreSQL
+  try {
     await pgPool.query('SELECT NOW()');
     console.log('✅ PostgreSQL Connected');
+  } catch (error) {
+    errors.push({ name: 'PostgreSQL', error });
+  }
 
-    // 3. Connect to Redis
+  // 3. Connect to Redis
+  try {
     await redisClient.connect();
     console.log('✅ Redis Connected');
-
-    return { pgPool, redisClient };
   } catch (error) {
-    console.error('❌ Database Connection Failed:', error);
-    process.exit(1);
+    errors.push({ name: 'Redis', error });
   }
+
+  if (errors.length > 0) {
+    console.error('❌ Database Connection Issues:');
+    for (const entry of errors) {
+      console.error(`   - ${entry.name}:`, entry.error?.message || entry.error);
+    }
+
+    if (shouldRequireDb) {
+      console.error('❌ REQUIRE_DB=true (or production default): exiting');
+      process.exit(1);
+    }
+
+    console.warn('⚠️  Continuing without full DB connectivity (REQUIRE_DB!=true)');
+  }
+
+  return { pgPool, redisClient };
 };
 
 module.exports = {

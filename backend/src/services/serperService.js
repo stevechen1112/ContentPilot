@@ -3,6 +3,15 @@ const axios = require('axios');
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 const SERPER_BASE_URL = 'https://google.serper.dev';
 
+const SERPER_TIMEOUT_MS = Number(process.env.SERPER_TIMEOUT_MS || 15000);
+const SERPER_MAX_RETRIES = Number(process.env.SERPER_MAX_RETRIES || 2);
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const serperHttp = axios.create({
+  timeout: SERPER_TIMEOUT_MS
+});
+
 class SerperService {
   /**
    * 執行 Google 搜尋（SERP 分析）
@@ -16,23 +25,39 @@ class SerperService {
         type = 'search'  // search, news, images
       } = options;
 
-      const response = await axios.post(
-        `${SERPER_BASE_URL}/${type}`,
-        {
-          q: query,
-          num,
-          gl,
-          hl
-        },
-        {
-          headers: {
-            'X-API-KEY': SERPER_API_KEY,
-            'Content-Type': 'application/json'
-          }
+      const url = `${SERPER_BASE_URL}/${type}`;
+      const payload = { q: query, num, gl, hl };
+      const config = {
+        headers: {
+          'X-API-KEY': SERPER_API_KEY,
+          'Content-Type': 'application/json'
         }
-      );
+      };
 
-      return response.data;
+      let lastError;
+      for (let attempt = 0; attempt <= SERPER_MAX_RETRIES; attempt++) {
+        try {
+          const response = await serperHttp.post(url, payload, config);
+          return response.data;
+        } catch (error) {
+          lastError = error;
+          const status = error.response?.status;
+          const code = error.code;
+          const isRetryableHttp = status === 429 || (status >= 500 && status < 600);
+          const isRetryableNetwork = ['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'ENOTFOUND'].includes(code);
+
+          if (attempt >= SERPER_MAX_RETRIES || (!isRetryableHttp && !isRetryableNetwork)) {
+            break;
+          }
+
+          // 指數退避 + 少量抖動，降低觸發 rate limit
+          const backoffMs = Math.min(4000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 250);
+          await sleep(backoffMs);
+        }
+      }
+
+      console.error('Serper API Error:', lastError.response?.data || lastError.message);
+      throw new Error('Failed to fetch search results');
     } catch (error) {
       console.error('Serper API Error:', error.response?.data || error.message);
       throw new Error('Failed to fetch search results');

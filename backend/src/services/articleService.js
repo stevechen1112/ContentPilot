@@ -5,6 +5,136 @@ const AuthoritySourceService = require('./authoritySourceService');
 const ContentQualityValidator = require('./contentQualityValidator');
 
 class ArticleService {
+  static detectDomain(outline) {
+    const text = `${outline?.keywords?.primary || ''} ${outline?.title || ''}`;
+    const lower = text.toLowerCase();
+    const financeTokens = ['理財', '投資', '股票', 'etf', '基金', '債券', '資產配置', '退休', '保險', '貸款', '信用卡'];
+    const healthTokens = ['失眠', '睡眠', '健康', '飲食', '疼痛', '上背痛', '運動', '疾病', '症狀'];
+
+    if (financeTokens.some(t => text.includes(t) || lower.includes(t))) return 'finance';
+    if (healthTokens.some(t => text.includes(t) || lower.includes(t))) return 'health';
+    return 'general';
+  }
+
+  static pickPeopleAlsoAskQuestions(outline, serp_data) {
+    const candidates = [];
+
+    const serpPaa = serp_data?.peopleAlsoAsk;
+    if (Array.isArray(serpPaa)) {
+      for (const item of serpPaa) {
+        if (!item) continue;
+        if (typeof item === 'string') candidates.push(item);
+        else if (typeof item === 'object') {
+          if (typeof item.question === 'string') candidates.push(item.question);
+          else if (typeof item.title === 'string') candidates.push(item.title);
+        }
+      }
+    }
+
+    const outlinePaa = outline?.serp_insights?.people_also_ask;
+    if (Array.isArray(outlinePaa)) {
+      for (const item of outlinePaa) {
+        if (typeof item === 'string') candidates.push(item);
+        else if (item && typeof item.question === 'string') candidates.push(item.question);
+      }
+    }
+
+    const unique = [];
+    const seen = new Set();
+    for (const q of candidates) {
+      const trimmed = String(q).trim();
+      if (!trimmed) continue;
+      if (seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      unique.push(trimmed);
+      if (unique.length >= 5) break;
+    }
+    return unique;
+  }
+
+  static buildFallbackFaqQuestions(outline, contentDomain) {
+    const kw = (outline?.keywords?.primary || outline?.title || '').toString().trim();
+    if (!kw) return [];
+
+    if (contentDomain === 'finance') {
+      return [
+        `新手投資理財入門應該先做什麼？`,
+        `緊急預備金要存多少才夠？`,
+        `每月只有 3000 元可以怎麼開始投資？`,
+        `ETF 和基金差在哪裡，新手該怎麼選？`,
+        `新手最常見的投資理財錯誤有哪些？`
+      ];
+    }
+
+    if (contentDomain === 'health') {
+      return [
+        `${kw} 常見原因是什麼？`,
+        `${kw} 有哪些先做的自我檢查？`,
+        `${kw} 什麼情況需要就醫？`,
+        `${kw} 有哪些居家改善方法？`,
+        `${kw} 有哪些常見迷思需要避免？`
+      ];
+    }
+
+    return [
+      `${kw} 是什麼？`,
+      `${kw} 新手該如何開始？`,
+      `${kw} 有哪些常見錯誤？`,
+      `${kw} 需要準備哪些工具或資料？`,
+      `${kw} 如何評估效果與調整？`
+    ];
+  }
+
+  static stripLinksAndUrls(html) {
+    if (!html) return html;
+    let out = String(html);
+    // Replace anchor tags with their visible text
+    out = out.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, '$1');
+    // Remove any raw URLs that may appear in text
+    out = out.replace(/https?:\/\/[^\s"'<>]+/gi, '');
+    return out;
+  }
+
+  static hasUnsupportedStatClaims(html) {
+    if (!html) return false;
+    const text = this.stripHtml(String(html));
+    return /(根據\s*(?:調查|統計)|超過\s*\d+\s*%|\d+\s*%)/.test(text);
+  }
+
+  static hasListicleOrBooklistCues(html) {
+    if (!html) return false;
+    const text = this.stripHtml(String(html));
+    return /(書單|推薦|懶人包|排行榜|必看|必讀|top\s*\d+|\d+\s*本)/i.test(text);
+  }
+
+  static async rewriteHtmlStrict(html, outline, options, purpose) {
+    const { provider, style_guide } = options || {};
+    const prompt = `你是一位極度嚴格的資深編輯。請重寫以下 HTML，使其符合規則。
+
+## 目的
+${purpose || '修正內容合規與自然度'}
+
+## 絕對規則（必須遵守）
+1. **禁止**任何外部連結、<a> 標籤、完整 URL。
+2. **禁止**「根據調查/根據統計/超過70%/83%」等具體統計或百分比（除非你能在文內保留明確 [x] 引用標記，但目前不允許新增）。
+3. **禁止**提到「書單/推薦/懶人包/排行榜/top N/幾本」等來源型態或用文章標題當證據。
+4. 保留原本的重點與段落結構（<p>, <ul>, <ol>, <strong>, <h3>）。
+5. 務必使用台灣繁體中文，語氣：${style_guide?.tone || '專業、務實、親切'}。
+
+## 原始 HTML
+${html}
+
+只輸出修正版 HTML，不要任何解釋。`;
+
+    const result = await AIService.generate(prompt, {
+      provider,
+      temperature: 0.2,
+      max_tokens: 1400
+    });
+
+    return this.stripLinksAndUrls(this.cleanMarkdownArtifacts(result.content || '').trim());
+  }
+
   /**
    * 根據大綱生成完整文章
    */
@@ -24,6 +154,8 @@ class ArticleService {
       } = options;
 
       console.log('📝 開始生成文章...');
+
+      const contentDomain = this.detectDomain(outline);
 
       // 🆕 RAG 架構：預先檢索權威來源 (LibrarianService)
       // 確保整篇文章使用同一組驗證過的來源，避免重複檢索與不一致
@@ -69,6 +201,27 @@ class ArticleService {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
+      // 🆕 SEO: 追加 FAQ 區塊（優先用 PAA 問題，吃長尾流量）
+      let faqQuestions = this.pickPeopleAlsoAskQuestions(outline, serp_data);
+      if (faqQuestions.length === 0) {
+        faqQuestions = this.buildFallbackFaqQuestions(outline, contentDomain);
+      }
+      if (faqQuestions.length > 0) {
+        const faqSection = await this.generateFaqSection(faqQuestions, outline, {
+          provider,
+          style_guide,
+          serp_data,
+          verifiedSources,
+          author_bio,
+          author_values,
+          target_audience,
+          unique_angle,
+          expected_outline,
+          personal_experience
+        });
+        sections.push(faqSection);
+      }
+
       const conclusion = await this.generateConclusion(outline, sections, { 
         provider, 
         style_guide,
@@ -102,7 +255,7 @@ class ArticleService {
       // 🆕 P0優化：應用內容過濾器進行語言統一和術語校正
       console.log('🧹 開始應用內容過濾器...');
       fullArticle = await ContentFilterService.cleanContent(fullArticle, { 
-        domain: 'health',
+        domain: contentDomain,
         skipHTML: false 
       });
       console.log('✅ 內容過濾完成');
@@ -213,7 +366,8 @@ class ArticleService {
     const formattedSources = LibrarianService.formatSourcesForPrompt(verifiedSources);
 
     // 用戶常見問題（來自 People Also Ask）
-    const userQuestions = serp_data?.peopleAlsoAsk?.slice(0, 3).join('\n- ') || '';
+    const userQuestionsList = this.pickPeopleAlsoAskQuestions(outline, serp_data).slice(0, 3);
+    const userQuestions = userQuestionsList.length ? userQuestionsList.map(q => `- ${q}`).join('\n') : '';
 
     // 熱門關鍵詞（來自競爭對手內容分析）
     const topKeywords = serp_data?.contentPatterns?.topSnippetKeywords?.slice(0, 8).map(k => k.word).join('、') || '';
@@ -254,16 +408,26 @@ ${expected_outline}
 
 ## 寫作要求
 1. **專業但誠實**：使用第三人稱或客觀描述，避免虛構個人經驗。
-2. **痛點共鳴**：開場直接切入讀者痛點，使用客觀事實和研究數據。
+2. **痛點共鳴**：開場直接切入讀者痛點，可用情境/例子/普遍觀察；**不要硬塞百分比統計**。
 3. 清楚說明本文將提供什麼價值
+4. **稱呼一致**：全篇一律使用「你／你的」，不要使用「您／您的」。
+5. **避免口號句**：不要寫「讓我們一起啟程吧／一起開始吧」這類口號；用更直接的資訊與可執行建議取代。
 4. **自然融入關鍵字**：主要關鍵字「${outline.keywords?.primary}」必須在引言中出現至少2次，以自然的方式融入句子中，避免堆砌或生硬插入。目標密度0.8%-1.2%。
 5. 字數控制在 200-300 字（較長的引言有利於SEO）
 6. 語氣：${style_guide?.tone || '專業、親切且具權威感'}
 ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 
+## 事實與數據規則（非常重要）
+1. **禁止編造統計**：不要寫「根據統計、超過70%、多數人」這類具體百分比或數量，除非參考文獻庫中有清楚的對應描述。
+2. **若沒有可信來源**：用「許多人/不少人/常見情況」等定性描述替代，或乾脆不寫。
+
 ## **E-E-A-T 引用規範（Citation Protocol）**：
 
 **核心原則：引用是為了增強可信度，不是為了炫耀來源。只在真正需要時才引用。**
+
+### 絕對禁止的引用/連結
+- **禁止**引用或連結任何「書單、推薦、必看、懶人包、排行榜」類文章（即使它出現在參考文獻庫）。
+- **禁止**使用「根據《文章標題》顯示/指出」這種學生式句型。
 
 ### 何時需要引用？
 ✅ **必須引用的情況**：
@@ -287,14 +451,13 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
    - ❌ 直接忽略：個人部落格、內容農場、書目清單、年度新書目錄、論壇討論
 
 2. **引用方式**（自然且簡潔）：
-   - ✅ 好的引用：「根據研究顯示，長期失眠會增加心血管疾病風險。」
-   - ✅ 好的引用：「專家建議睡前應避免使用3C產品。」
-   - ❌ 壞的引用：「根據114年度第2批中文新書的資料顯示，運動有益健康。」（來源不當且內容是常識）
-   - ❌ 壞的引用：「根據XX大學圖書館館藏目錄指出...」（來源類型錯誤）
+  - ✅ 好的引用：「研究指出，長期分散投資可降低波動風險。」
+  - ✅ 好的引用：「在實務上常見的做法是先準備緊急預備金，再開始投資。」
+  - ❌ 壞的引用：「根據《XX推薦書單》顯示...」（書單/推薦類來源不具權威性）
 
 3. **禁止事項**：
-   ❌ 不要寫出完整的 URL (例如 https://...)
-   ❌ 不要寫 <a href="..."> 標籤 (系統會自動處理)
+  ❌ 不要寫出完整的 URL (例如 https://...)
+  ❌ 不要寫 <a href="..."> 標籤
    ❌ 不要寫引用標記如 [1], [2], [3] 等
    ❌ 不要引用參考文獻庫以外的來源
    ❌ 不要為常識性內容強行添加引用
@@ -334,8 +497,19 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
     // 🆕 清理 Markdown 代碼塊標記
     let cleanedContent = this.cleanMarkdownArtifacts(result.content);
     
-    // 🆕 Post-processing: 將 [1] 標記轉換為真實連結
+    // 🆕 Post-processing: 移除引用標記、並強制去除外部連結/URL
     let processedHtml = LibrarianService.injectCitations(cleanedContent, verifiedSources);
+    processedHtml = this.stripLinksAndUrls(processedHtml);
+
+    // P0: 介紹段落防回歸（統計/書單/推薦類措辭）
+    if (this.hasUnsupportedStatClaims(processedHtml) || this.hasListicleOrBooklistCues(processedHtml)) {
+      processedHtml = await this.rewriteHtmlStrict(
+        processedHtml,
+        outline,
+        options,
+        '移除不可靠統計/書單式引用，讓引言更自然可信'
+      );
+    }
 
     return {
       html: processedHtml,
@@ -513,7 +687,7 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 
 ### 最終原則
 **你的目標是寫出一篇「專家級」的文章，而不是一篇「讀書心得報告」。**
-- 專家會說：「建議您存下 3 個月薪水。」
+- 專家會說：「建議你先存下 3 個月生活費。」
 - 學生會說：「根據網路上的一篇文章說，要存 3 個月薪水。」
 **請扮演專家，直接給出建議，除非是引用「數據」或「法規」，否則不要刻意強調「根據...」。**
 
@@ -642,8 +816,19 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
       console.warn(`  ⚠️ 初稿為空，跳過修潤步驟`);
     }
 
-    // 🆕 Post-processing: 將 [1] 標記轉換為真實連結
+    // 🆕 Post-processing: 移除引用標記、並強制去除外部連結/URL
     cleanedHtml = LibrarianService.injectCitations(cleanedHtml, verifiedSources);
+    cleanedHtml = this.stripLinksAndUrls(cleanedHtml);
+
+    // P0: 段落防回歸（書單/推薦/懶人包、以及無來源的統計字眼）
+    if (this.hasUnsupportedStatClaims(cleanedHtml) || this.hasListicleOrBooklistCues(cleanedHtml)) {
+      cleanedHtml = await this.rewriteHtmlStrict(
+        cleanedHtml,
+        outline,
+        options,
+        '移除書單/推薦/懶人包式引用與不可靠統計，保留專家建議與可執行步驟'
+      );
+    }
 
     // 🆕 最终质量验证
     const finalContent = {
@@ -684,6 +869,8 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 2. **事實查核**：
    - 確保所有數據引用都有 [x] 標記，且語氣客觀。
    - 如果出現沒有對應來源的 [x] 標記，立即刪除。
+  - 如果出現「根據統計/超過70%」等具體數字但沒有可靠來源支撐，請改寫為不含具體數字的定性描述。
+  - 如果出現「書單/推薦/必看/懶人包」類來源的引用或連結，立即刪除並改寫。
 3. **結構修正**：
    - 確保**沒有** H1 或 H2 標題（最高層級只能是 H3）。
    - 確保每個子主題都有 <h3> 標籤，形成清晰層級。
@@ -695,6 +882,8 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
    - 將抽象描述改為具體案例或數據。
    - 確保國中生也能看懂。
 6. **語氣潤飾**：${style_guide?.tone || '專業、權威且易讀'}，口吻自然像對朋友說話。
+7. **稱呼一致**：全篇一律使用「你／你的」，不要使用「您／您的」。
+8. **刪除口號句**：如果出現「讓我們一起」「一起開始/啟程」等句子，請刪掉並用實用建議取代。
 
 ## 👤 作者 Persona 與價值觀一致性檢查 (重要！)
 ${author_bio ? `- 作者背景: ${author_bio}` : ''}
@@ -723,7 +912,7 @@ ${draftHtml}
 ## 輸出要求
 - 直接輸出修潤後的 HTML。
 - 保持 HTML 標籤結構（<p>, <ul>, <h3>）。
-- **禁止**生成 H2 標題或完整 URL。
+- **禁止**生成 H2 標題、完整 URL、或任何外部連結。
 - 不要解釋你改了什麼，直接給出最終成品。
 - 務必使用台灣繁體中文。`;
 
@@ -737,21 +926,86 @@ ${draftHtml}
         temperature: 0.3, // 低溫模式，確保穩定性與精確度
         max_tokens: maxTokens
       });
-      
+
       // 🔧 清理 Markdown 標記
       let refinedHtml = this.cleanMarkdownArtifacts(result.content.trim());
-      
+
       // 再次清理可能產生的 H2 (雙重保險)
       const h2Pattern = /^<h2[^>]*>.*?<\/h2>\s*/i;
       if (h2Pattern.test(refinedHtml)) {
         refinedHtml = refinedHtml.replace(h2Pattern, '');
       }
-      
+
+      // 防止模型自行加外連/URL
+      refinedHtml = this.stripLinksAndUrls(refinedHtml);
+
+      // 防回歸：不可靠統計、書單/懶人包式來源
+      if (this.hasUnsupportedStatClaims(refinedHtml) || this.hasListicleOrBooklistCues(refinedHtml)) {
+        refinedHtml = await this.rewriteHtmlStrict(
+          refinedHtml,
+          outline,
+          options,
+          '移除書單/統計等不可靠內容並保持段落品質'
+        );
+      }
+
       return refinedHtml;
     } catch (error) {
       console.warn('  ⚠️ 修潤過程失敗，將使用初稿:', error.message);
       return draftHtml;
     }
+  }
+
+  /**
+   * 生成 FAQ 區塊（作為一個額外的段落，段內使用 H3 Q/A）
+   */
+  static async generateFaqSection(questions, outline, options = {}) {
+    const { provider, style_guide, target_audience, author_bio, author_values } = options;
+
+    const qList = questions.map((q, idx) => `${idx + 1}. ${q}`).join('\n');
+
+    const prompt = `你是一位專業的 SEO 內容寫手。請撰寫文章的 FAQ 段落，專門回答新手最常問的問題。
+
+## 主題
+${outline.title}
+
+## 主要關鍵字
+${outline.keywords?.primary || ''}
+
+## 目標受眾
+${target_audience || '一般讀者'}
+
+## FAQ 題目（必須逐題回答）
+${qList}
+
+## 寫作要求
+1. 請直接輸出 HTML（使用多個 <h3> 作為問題標題，每題至少 2 段 <p> 回答）。
+2. 每題要有「可執行建議」或「注意事項」，可以用 <ul> 條列。
+3. **禁止**寫出完整 URL、禁止外部連結、禁止 <a> 標籤、禁止 [1] 引用標記。
+4. **禁止**捏造任何統計數字或百分比。
+5. 語氣：${style_guide?.tone || '專業、親切且具權威感'}。
+6. **稱呼一致**：全篇一律使用「你／你的」，不要使用「您／您的」。
+
+## 👤 作者 Persona
+${author_bio ? `- 作者背景: ${author_bio}` : ''}
+${author_values ? `- 核心價值觀: ${author_values}` : ''}
+
+只輸出 HTML，不要任何解釋。`;
+
+    const result = await AIService.generate(prompt, {
+      provider,
+      temperature: 0.4,
+      max_tokens: 1800
+    });
+
+    let cleanedHtml = this.cleanMarkdownArtifacts(result.content || '').trim();
+    cleanedHtml = this.stripLinksAndUrls(cleanedHtml);
+
+    return {
+      heading: '常見問題（FAQ）',
+      html: cleanedHtml,
+      plain_text: this.stripHtml(cleanedHtml)
+    };
   }
 
   /**
@@ -786,7 +1040,7 @@ ${target_audience || '一般讀者'}
 ## 寫作要求
 1. 總結文章的核心要點
 2. 強調讀者的收穫與價值
-3. 包含明確的行動呼籲（Call to Action）
+3. 包含明確的行動呼籲（Call to Action），但要務實（例如「今天先完成收支盤點」）；**不要**出現推銷式語句（如「立即下載免費表格」）。
 4. **自然融入關鍵字**：主要關鍵字至少自然出現 1-2 次，避免堆砌。
 5. 若前文已引用來源，結論可重申 1 個關鍵來源以強化可信度（不要新造來源）。
 6. 字數控制在 150-200 字

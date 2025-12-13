@@ -251,7 +251,7 @@ ${experienceText}
 4. H2-${targetSections}：結論與行動呼籲
 5. 每個 H2 下必須有 1-2 個 H3 子標題（不超過2個），形成完整層級。
 6. **PAA 整合**：必須將 PAA (People Also Ask) 的前 3 題融入 H2/H3 標題。
-7. **實證要求**：每個 H2 需提及具體案例或數據。
+7. **實證要求**：每個 H2 需規劃「具體案例 / 可執行做法 / 可信數據佔位符」其一；**避免無來源的百分比統計**。
 
 **標題要求**
 - H2 標題需含語意化關鍵字（如「${keyword}」的變形詞）
@@ -262,7 +262,7 @@ ${experienceText}
 {
   "title": "含${keyword}，60字內，加誘因詞（如：新手必讀/完整攻略/3步驟）",
   "meta_description": "140-160字，重申${keyword}，含行動呼籲",
-  "introduction": {"hook":"吸睛開場（統計數據/故事/痛點）","context":"S現狀+C衝突","thesis":"Q核心問題陳述"},
+  "introduction": {"hook":"吸睛開場（故事/痛點/情境；避免無來源的百分比統計）","context":"S現狀+C衝突","thesis":"Q核心問題陳述"},
   "sections": [{"heading":"主標題文字（SCQA-Q或A階段，含關鍵字變形，不要加H2:前綴）","key_points":["具體重點1","具體重點2"],"subsections":[{"heading":"子主題（不要加H3:前綴）","description":"1-2句說明"}],"estimated_words":${wordsPerSection}}],
   "conclusion": {"summary":"總結核心價值","call_to_action":"明確CTA（如：立即下載/開始實踐）"},
   "keywords": {"primary":"${keyword}","secondary":["次要詞2-3個"],"lsi":["LSI詞5-8個"]}

@@ -12,6 +12,8 @@
 const axios = require('axios');
 const cheerio = require('cheerio'); // 需安裝: npm install cheerio
 
+const COMPETITOR_FETCH_TIMEOUT_MS = Number(process.env.COMPETITOR_FETCH_TIMEOUT_MS || 15000);
+
 class CompetitorAnalysisService {
   
   /**
@@ -30,7 +32,7 @@ class CompetitorAnalysisService {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'text/html,application/xhtml+xml'
         },
-        timeout: 10000
+        timeout: COMPETITOR_FETCH_TIMEOUT_MS
       });
 
       const html = response.data;

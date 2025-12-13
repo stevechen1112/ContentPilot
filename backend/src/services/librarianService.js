@@ -37,6 +37,9 @@ class LibrarianService {
    */
   async getVerifiedSources(keyword, serpData = null) {
     console.log(`📚 [Librarian] 正在為 "${keyword}" 檢索權威來源...`);
+
+    const maxSources = Number(process.env.LIBRARIAN_MAX_SOURCES || 8);
+    const dynamicMaxSources = Number(process.env.LIBRARIAN_DYNAMIC_MAX_SOURCES || 15);
     
     let sources = [];
     const seenUrls = new Set();
@@ -57,6 +60,17 @@ class LibrarianService {
       for (const result of serpData.topResults) {
         if (seenUrls.has(result.link)) continue;
 
+        // P0: 來源品質預過濾（避免「書單/推薦/懶人包」等低可信頁面進入 Reference Library）
+        const preQuality = AuthoritySourceService.validateSourceQuality({
+          title: result.title,
+          url: result.link,
+          snippet: result.snippet || ''
+        });
+        if (!preQuality.valid) {
+          console.log(`  ❌ 來源品質過濾: ${result.link} (${preQuality.reason})`);
+          continue;
+        }
+
         // 執行嚴格驗證 (P1 格式 + P2 可訪問性)
         const validation = await this.verifySource(result.link);
         
@@ -75,18 +89,28 @@ class LibrarianService {
           console.log(`  ❌ 驗證失敗: ${result.link} (${validation.reason})`);
         }
 
-        if (sources.length >= 5) break; // 最多收集 5 個來源
+        if (sources.length >= maxSources) break; // 最多收集 N 個來源（品質優先可提高）
       }
     }
 
-    // 3. 如果來源仍不足，嘗試動態搜尋 (Fallback)
-    if (sources.length < 2) {
+    // 3. 如果來源仍不足，嘗試動態搜尋補齊 (品質優先)
+    if (sources.length < maxSources) {
       console.log('  ⚠️ 來源不足，嘗試動態搜尋...');
       try {
         // 增加 maxSources 到 10，讓更多商業/一般來源能進入候選名單，交由 AI 判斷
-        const dynamicSources = await AuthoritySourceService.getAuthoritySources(keyword, { maxSources: 10 });
+        const dynamicSources = await AuthoritySourceService.getAuthoritySources(keyword, { maxSources: dynamicMaxSources });
         for (const ds of dynamicSources) {
           if (seenUrls.has(ds.url)) continue;
+
+          // P0: 來源品質預過濾（動態來源亦需過濾書單/推薦類）
+          const preQuality = AuthoritySourceService.validateSourceQuality({
+            title: ds.title,
+            url: ds.url,
+            snippet: ds.snippet || ''
+          });
+          if (!preQuality.valid) {
+            continue;
+          }
           
           // 再次確認可訪問性 (AuthoritySourceService 可能只做了 P1)
           const validation = await this.verifySource(ds.url);
@@ -101,6 +125,8 @@ class LibrarianService {
             });
             seenUrls.add(ds.url);
           }
+
+          if (sources.length >= maxSources) break;
         }
       } catch (err) {
         console.warn('  ⚠️ 動態搜尋失敗:', err.message);

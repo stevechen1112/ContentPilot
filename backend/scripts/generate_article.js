@@ -15,6 +15,36 @@ const unique_angle = '從每月3000元開始的理財計畫，不推薦高風險
 const expected_outline = '理財前的心理建設、緊急預備金規劃、基礎投資工具介紹、資產配置原則、常見錯誤避坑';
 const personal_experience = '輔導案例：月薪35K上班族，透過532分配法則，2年存到第一桶金50萬';
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildMetaDescription(article, draft) {
+  const raw = (
+    draft?.meta_description ||
+    draft?.metaDescription ||
+    article?.meta_description ||
+    article?.metaDescription ||
+    ''
+  )
+    .toString()
+    .trim();
+
+  if (raw) return escapeHtml(raw.replace(/\s+/g, ' ').slice(0, 160));
+
+  const title = (draft?.title || article?.title || '').toString().trim();
+  const kw = (article?.keywords?.primary || '').toString().trim();
+  const fallback = [title, kw ? `重點整理與實作建議（${kw}）` : '重點整理與實作建議']
+    .filter(Boolean)
+    .join('｜');
+  return escapeHtml(fallback.replace(/\s+/g, ' ').slice(0, 160));
+}
+
 async function main() {
   try {
     // Ensure output directory exists
@@ -68,13 +98,14 @@ async function main() {
     // Generate HTML file
     const htmlPath = path.join(OUTPUT_DIR, `${timestamp}_${safeKeyword}.html`);
     const draft = article.content_draft || article.content;
+    const metaDescription = buildMetaDescription(article, draft);
     
     let html = `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="${article.meta_description || ''}">
+    <meta name="description" content="${metaDescription}">
     <title>${draft.title}</title>
     <style>
         body { max-width: 800px; margin: 40px auto; padding: 0 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.8; color: #333; }

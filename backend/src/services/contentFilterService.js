@@ -556,8 +556,108 @@ class ContentFilterService {
     '关键': '關鍵',
     '紧要': '緊要',
     '必要': '必要',
-    '需要': '需要'
+    '需要': '需要',
+
+    // 台灣常見用字（補強：避免簡體/陸用詞混入）
+    '想象': '想像',
+    '帐户': '帳戶',
+    '账户': '帳戶',
+    '賬戶': '帳戶',
+    '账戶': '帳戶',
+    '賬號': '帳號',
+    '账号': '帳號',
+    '下载': '下載'
   };
+
+  /**
+   * 文風一致化：統一稱呼、移除口號式句子、修正常見陸用語
+   */
+  static normalizeTaiwanStyle(text) {
+    if (!text) return text;
+
+    let result = text;
+
+    // 1) 稱呼統一：全篇用「你」
+    result = result.replace(/您們/g, '你們');
+    result = result.replace(/您的/g, '你的');
+    result = result.replace(/您/g, '你');
+
+    // 2) 口號式雞湯句：直接移除或降級
+    result = result.replace(/讓我們一起啟程吧！?/g, '');
+    result = result.replace(/讓我們一起開始吧！?/g, '');
+    result = result.replace(/一起啟程吧！?/g, '');
+    result = result.replace(/一起開始吧！?/g, '');
+
+    // 3) 過度戲劇化開場：降低語氣
+    result = result.replace(/想像一下，?/g, '先從一個常見情境開始：');
+
+    // 3.5 台灣常用詞優先（即使原本已是繁體，也做用字統一）
+    result = result.replace(/計劃/g, '計畫');
+    result = result.replace(/通過/g, '透過');
+
+    // 4) 常見陸用詞補強（保險）
+    result = result.replace(/賬戶/g, '帳戶');
+    result = result.replace(/賬號/g, '帳號');
+
+    // 5) 減少「我們」的官方敘事感，改成更直接的讀者導向
+    result = result.replace(/在這篇文章中，我們將為你提供/g, '這篇文章會提供你');
+    result = result.replace(/本文將為你提供/g, '這篇文章會提供你');
+    result = result.replace(/在這篇文章中，將帶你/g, '這篇文章會帶你');
+    // 避免模板式「在這篇文章中，將介紹...」
+    result = result.replace(/在這篇文章中[，,]?\s*將介紹/g, '接下來會介紹');
+    result = result.replace(/在這篇文章中[，,]?\s*會介紹/g, '接下來會介紹');
+    result = result.replace(/這篇文章[將会]介紹/g, '接下來會介紹');
+    result = result.replace(/本文將介紹/g, '接下來會介紹');
+    result = result.replace(/在本文中，我們/g, '在本文中，');
+    result = result.replace(/在這篇文章中，我們/g, '在這篇文章中，');
+    result = result.replace(/我們將/g, '這篇文章會');
+    // 避免生成「在文章中，文章整理了…」這種不自然套話
+    result = result.replace(/我們探討了/g, '這篇文章整理了');
+
+    // 6) 收斂過度肯定/口號化用語（偏務實）
+    result = result.replace(/在本文中，探討了/g, '這篇文章整理了');
+    result = result.replace(/理財之旅/g, '理財規劃');
+    // 避免過強 CTA（通用降級）
+    result = result.replace(/立即開始你的理財規劃[！!]?/g, '你可以從今天開始規劃理財');
+    result = result.replace(/現在就開始你的理財規劃吧[！!]?/g, '你可以從今天開始規劃理財');
+    // 避免更強硬的命令式 CTA
+    result = result.replace(/現在[，,]?\s*請立即行動[：:，,]?\s*/g, '你可以先從這一步開始：');
+    result = result.replace(/請立即行動[：:，,]?\s*/g, '你可以先從這一步開始：');
+    result = result.replace(/立即行動[，,]\s*開始理財/g, '開始規劃理財');
+    result = result.replace(/立即行動/g, '開始著手');
+    // 避免「下載我的免費...」這類導流句
+    result = result.replace(/立即下載我的免費[^。！？!]*[。！？!]?/g, '');
+    result = result.replace(/立即下載我的資源包[^。！？!]*[。！？!]?/g, '');
+    result = result.replace(/絕對能助你一臂之力/g, '能幫你更好上手');
+    result = result.replace(/為你的未來工作/g, '為你的未來累積');
+    result = result.replace(/也能讓你在兩年內存到第一桶金/g, '有機會逐步存到第一桶金');
+    result = result.replace(/邁向財務自由/g, '朝財務目標前進');
+    result = result.replace(/現在是時候行動了！/g, '你可以從今天開始：');
+    result = result.replace(/現在是時候行動了[，,]/g, '你可以從今天開始：');
+    result = result.replace(/未來財務自由/g, '未來財務目標');
+    result = result.replace(/財務自由的基石/g, '財務目標的基礎');
+    result = result.replace(/新手們/g, '新手');
+    result = result.replace(/透過本篇文章，文章整理了/g, '這篇文章整理了');
+    result = result.replace(/理財的旅程/g, '理財的過程');
+
+    // 6.5) 去除機械式模板句（避免「在文章中，文章整理了…」）
+    result = result.replace(/在(這篇)?文章中[，,]?\s*文章整理了/g, '這篇文章整理了');
+    result = result.replace(/在(這篇)?文章中[，,]?\s*這篇文章整理了/g, '這篇文章整理了');
+    result = result.replace(/在(這篇)?文章中[，,]?\s*探討了/g, '這篇文章整理了');
+    result = result.replace(/在本文中[，,]?\s*文章整理了/g, '這篇文章整理了');
+    result = result.replace(/在本文中[，,]?\s*這篇文章整理了/g, '這篇文章整理了');
+
+    // 7) 避免第一人稱「專家自稱」與口號式收尾
+    result = result.replace(/作為一名[^，。]*，我相信/g, '如果你想更有系統地開始，');
+    // 擴充覆蓋常見變體（例如：讓未來的你感謝現在努力的自己！）
+    result = result.replace(/讓未來的你感謝現在(努力的)?(自己|決定)！?/g, '先把第一步做完就好。');
+    result = result.replace(
+      /今天，?先從盤點你的收支開始，?為自己的理財之旅奠定堅實的基礎！/g,
+      '你可以先從盤點收支開始，為自己的理財規劃打好基礎。'
+    );
+
+    return result;
+  }
 
   /**
    * 健康醫療領域專業術語校正表
@@ -786,6 +886,13 @@ class ContentFilterService {
     cleaned = this.unifyTraditionalChinese(cleaned);
     if (beforeTraditional !== cleaned) {
       console.log('  ✓ 統一為繁體中文');
+    }
+
+    // 2.5 文風一致化（你/您、口號句、常見陸用語）
+    const beforeStyle = cleaned;
+    cleaned = this.normalizeTaiwanStyle(cleaned);
+    if (beforeStyle !== cleaned) {
+      console.log('  ✓ 統一台灣用字與文風');
     }
     
     // 3. 術語校正
