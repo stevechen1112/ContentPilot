@@ -3,6 +3,12 @@
  * 負責語言統一、術語校正、HTML修復、內容品質檢查等後處理任務
  */
 
+const {
+  applyReplacementRules,
+  getTaiwanStyleNormalizationRules,
+  rewriteTemplateOpeningInIntroduction
+} = require('./taiwanStyleNormalizationRules');
+
 class ContentFilterService {
   /**
    * 機械式句型模板（需要被檢測並標記的問題模式）
@@ -25,6 +31,9 @@ class ContentFilterService {
     /根據我們團隊(的)?(測試|數據|經驗|觀察)/g,
     /根據我的(觀察|經驗|判斷)/g,
     /在我服務的.*?(中|裡)/g,
+    /我在\s*\d+\s*年.*?(生涯|職涯)中/g,
+    /在我\s*\d+\s*年.*?(生涯|職涯)中/g,
+    /在我.*?(生涯|職涯)中所(見證|看過|遇過)/g,
     /我有一位(客戶|朋友|學生)/g,
     /我曾經(遇過|測試過|嘗試過)/g,
     /我親身經歷/g,
@@ -570,93 +579,38 @@ class ContentFilterService {
   };
 
   /**
+   * 移除/替換生成過程中殘留的佔位符（--keyword、{keyword} 等）
+   */
+  static stripPlaceholders(text, keyword = '') {
+    if (text === null || text === undefined) return text;
+    const safeKw = String(keyword || '').trim();
+    let out = String(text);
+    out = out.replace(/--keyword/gi, safeKw || '');
+    out = out.replace(/\{keyword\}/gi, safeKw || '');
+    out = out.replace(/--qualityGate/gi, '');
+    out = out.replace(/--brief/gi, '');
+    out = out.replace(/\s{2,}/g, ' ').trim();
+    return out;
+  }
+
+  /**
    * 文風一致化：統一稱呼、移除口號式句子、修正常見陸用語
    */
-  static normalizeTaiwanStyle(text) {
+  static normalizeTaiwanStyle(text, options = {}) {
     if (!text) return text;
 
-    let result = text;
+    const { scope } = options || {};
 
-    // 1) 稱呼統一：全篇用「你」
-    result = result.replace(/您們/g, '你們');
-    result = result.replace(/您的/g, '你的');
-    result = result.replace(/您/g, '你');
+    let out = text;
+    // B: Intro-only rewrite to eliminate template openings like "在這篇文章中/本文將".
+    if (scope === 'introduction') {
+      out = rewriteTemplateOpeningInIntroduction(out);
+      // 強化：移除殘留的模板式開場（防止「本文將/在本文中」漏網）
+      out = out.replace(/^(\s*<p>\s*)?(?:在這篇文章中|本文將|在本文中|本篇文章將|在本篇文章中|這篇文章將|本文會|本篇將)\s*/i, '$1');
+      out = out.replace(/^\s*(?:在這篇文章中|本文將|在本文中|本篇文章將|在本篇文章中|這篇文章將|本文會|本篇將)\s*/i, '');
+    }
 
-    // 2) 口號式雞湯句：直接移除或降級
-    result = result.replace(/讓我們一起啟程吧！?/g, '');
-    result = result.replace(/讓我們一起開始吧！?/g, '');
-    result = result.replace(/一起啟程吧！?/g, '');
-    result = result.replace(/一起開始吧！?/g, '');
-
-    // 3) 過度戲劇化開場：降低語氣
-    result = result.replace(/想像一下，?/g, '先從一個常見情境開始：');
-
-    // 3.5 台灣常用詞優先（即使原本已是繁體，也做用字統一）
-    result = result.replace(/計劃/g, '計畫');
-    result = result.replace(/通過/g, '透過');
-
-    // 4) 常見陸用詞補強（保險）
-    result = result.replace(/賬戶/g, '帳戶');
-    result = result.replace(/賬號/g, '帳號');
-
-    // 5) 減少「我們」的官方敘事感，改成更直接的讀者導向
-    result = result.replace(/在這篇文章中，我們將為你提供/g, '這篇文章會提供你');
-    result = result.replace(/本文將為你提供/g, '這篇文章會提供你');
-    result = result.replace(/在這篇文章中，將帶你/g, '這篇文章會帶你');
-    // 避免模板式「在這篇文章中，將介紹...」
-    result = result.replace(/在這篇文章中[，,]?\s*將介紹/g, '接下來會介紹');
-    result = result.replace(/在這篇文章中[，,]?\s*會介紹/g, '接下來會介紹');
-    result = result.replace(/這篇文章[將会]介紹/g, '接下來會介紹');
-    result = result.replace(/本文將介紹/g, '接下來會介紹');
-    result = result.replace(/在本文中，我們/g, '在本文中，');
-    result = result.replace(/在這篇文章中，我們/g, '在這篇文章中，');
-    result = result.replace(/我們將/g, '這篇文章會');
-    // 避免生成「在文章中，文章整理了…」這種不自然套話
-    result = result.replace(/我們探討了/g, '這篇文章整理了');
-
-    // 6) 收斂過度肯定/口號化用語（偏務實）
-    result = result.replace(/在本文中，探討了/g, '這篇文章整理了');
-    result = result.replace(/理財之旅/g, '理財規劃');
-    // 避免過強 CTA（通用降級）
-    result = result.replace(/立即開始你的理財規劃[！!]?/g, '你可以從今天開始規劃理財');
-    result = result.replace(/現在就開始你的理財規劃吧[！!]?/g, '你可以從今天開始規劃理財');
-    // 避免更強硬的命令式 CTA
-    result = result.replace(/現在[，,]?\s*請立即行動[：:，,]?\s*/g, '你可以先從這一步開始：');
-    result = result.replace(/請立即行動[：:，,]?\s*/g, '你可以先從這一步開始：');
-    result = result.replace(/立即行動[，,]\s*開始理財/g, '開始規劃理財');
-    result = result.replace(/立即行動/g, '開始著手');
-    // 避免「下載我的免費...」這類導流句
-    result = result.replace(/立即下載我的免費[^。！？!]*[。！？!]?/g, '');
-    result = result.replace(/立即下載我的資源包[^。！？!]*[。！？!]?/g, '');
-    result = result.replace(/絕對能助你一臂之力/g, '能幫你更好上手');
-    result = result.replace(/為你的未來工作/g, '為你的未來累積');
-    result = result.replace(/也能讓你在兩年內存到第一桶金/g, '有機會逐步存到第一桶金');
-    result = result.replace(/邁向財務自由/g, '朝財務目標前進');
-    result = result.replace(/現在是時候行動了！/g, '你可以從今天開始：');
-    result = result.replace(/現在是時候行動了[，,]/g, '你可以從今天開始：');
-    result = result.replace(/未來財務自由/g, '未來財務目標');
-    result = result.replace(/財務自由的基石/g, '財務目標的基礎');
-    result = result.replace(/新手們/g, '新手');
-    result = result.replace(/透過本篇文章，文章整理了/g, '這篇文章整理了');
-    result = result.replace(/理財的旅程/g, '理財的過程');
-
-    // 6.5) 去除機械式模板句（避免「在文章中，文章整理了…」）
-    result = result.replace(/在(這篇)?文章中[，,]?\s*文章整理了/g, '這篇文章整理了');
-    result = result.replace(/在(這篇)?文章中[，,]?\s*這篇文章整理了/g, '這篇文章整理了');
-    result = result.replace(/在(這篇)?文章中[，,]?\s*探討了/g, '這篇文章整理了');
-    result = result.replace(/在本文中[，,]?\s*文章整理了/g, '這篇文章整理了');
-    result = result.replace(/在本文中[，,]?\s*這篇文章整理了/g, '這篇文章整理了');
-
-    // 7) 避免第一人稱「專家自稱」與口號式收尾
-    result = result.replace(/作為一名[^，。]*，我相信/g, '如果你想更有系統地開始，');
-    // 擴充覆蓋常見變體（例如：讓未來的你感謝現在努力的自己！）
-    result = result.replace(/讓未來的你感謝現在(努力的)?(自己|決定)！?/g, '先把第一步做完就好。');
-    result = result.replace(
-      /今天，?先從盤點你的收支開始，?為自己的理財之旅奠定堅實的基礎！/g,
-      '你可以先從盤點收支開始，為自己的理財規劃打好基礎。'
-    );
-
-    return result;
+    return applyReplacementRules(out, getTaiwanStyleNormalizationRules());
   }
 
   /**
@@ -857,22 +811,78 @@ class ContentFilterService {
    * 綜合內容清理（主要方法）
    */
   static async cleanContent(content, options = {}) {
-    const { domain = 'health', skipHTML = false } = options;
+    const { domain = 'health', skipHTML = false, keyword = '', brief = null, outlineTitle = '' } = options;
+    const mustInclude = Array.isArray(brief?.deliverables?.mustInclude) ? brief.deliverables.mustInclude : [];
+    const briefWantsSteps = mustInclude.some((item) => /step|步驟|流程|checklist/i.test(String(item || '')));
+    const outlinePromisesSteps = /([0-9一二兩三四五六七八九十]{1,3})\s*(步驟|步)/i.test(String(outlineTitle || ''));
+    const allowStepHeadings = briefWantsSteps || outlinePromisesSteps;
     
     if (!content) return content;
     
-    // 處理不同類型的輸入
-    let isObject = false;
-    let originalContent = content;
-    
-    if (typeof content === 'object') {
-      isObject = true;
-      content = JSON.stringify(content);
-    }
-    
+    // Helper: deep-transform strings inside objects/arrays with path awareness.
+    const transformDeep = (value, pathParts = []) => {
+      if (value === null || value === undefined) return value;
+
+      if (typeof value === 'string') {
+        const path = pathParts.join('.');
+        const isIntro = path === 'content.introduction.html' || path === 'content.introduction.plain_text';
+
+        let out = value;
+        out = this.removeInvalidCharacters(out);
+        out = this.unifyTraditionalChinese(out);
+        out = this.stripPlaceholders(out, keyword);
+        out = this.normalizeTaiwanStyle(out, isIntro ? { scope: 'introduction' } : undefined);
+        out = this.correctTerminology(out, domain);
+
+        // Normalize section headings/titles: strip Q:/A: prefixes and redundant markers after 「第X步」.
+        const lastKey = pathParts[pathParts.length - 1];
+        if (lastKey === 'heading' || lastKey === 'title') {
+          out = out.replace(/^(第\s*[0-9一二兩三四五六七八九十]+\s*步\s*[：:]\s*)[AaＡａ]\s*[：:]?\s*/, '$1');
+          out = out.replace(/^[AaＱQｑＱ]\s*[：:]\s*/, '');
+          if (!allowStepHeadings) {
+            out = out.replace(/^(第\s*[0-9一二兩三四五六七八九十]+\s*步\s*[：:\-－]?\s*)/i, '');
+            out = out.replace(/^步驟\s*[0-9一二兩三四五六七八九十]+\s*[：:\-－]?\s*/i, '');
+            out = out.replace(/^Step\s*\d+\s*[：:\-－]?\s*/i, '');
+            out = out.replace(/^\d+\s*(?:步驟|步)\s*[：:\-－]?\s*/i, '');
+            if (!out.trim()) out = value; // avoid wiping heading completely
+          }
+        }
+        if (!skipHTML && out.includes('<')) {
+          out = this.fixHTMLTags(out);
+        }
+        return out;
+      }
+
+      if (Array.isArray(value)) {
+        return value.map((item, idx) => transformDeep(item, pathParts.concat(String(idx))));
+      }
+
+      if (typeof value === 'object') {
+        const outObj = Array.isArray(value) ? [] : {};
+        for (const [k, v] of Object.entries(value)) {
+          outObj[k] = transformDeep(v, pathParts.concat(String(k)));
+        }
+        return outObj;
+      }
+
+      return value;
+    };
+
     let cleaned = content;
     
     console.log('🧹 開始內容清理...');
+
+    // Structured content: transform string fields directly (more reliable than JSON-string replacements).
+    if (typeof cleaned === 'object') {
+      const before = cleaned;
+      cleaned = transformDeep(cleaned, []);
+      // Keep the original log style (avoid noisy deep diffs).
+      if (before !== cleaned) {
+        console.log('  ✓ 已套用物件層級的內容清理（含 intro 開場改寫）');
+      }
+      console.log('✅ 內容清理完成');
+      return cleaned;
+    }
     
     // 1. 移除無效字符
     const beforeInvalidChars = cleaned;
@@ -908,17 +918,6 @@ class ContentFilterService {
       cleaned = this.fixHTMLTags(cleaned);
       if (beforeHTML !== cleaned) {
         console.log('  ✓ 修復HTML標籤');
-      }
-    }
-    
-    // 恢復原始類型
-    if (isObject) {
-      try {
-        cleaned = JSON.parse(cleaned);
-      } catch (error) {
-        console.error('❌ JSON解析失敗，返回字串:', error.message);
-        // 如果JSON解析失敗，返回原始對象
-        return originalContent;
       }
     }
     
@@ -1004,13 +1003,14 @@ class ContentFilterService {
       return { passed: true, message: '無法驗證' };
     }
 
-    // 計算純文本（移除HTML）
+    // 計算純文本（移除HTML + 移除空白），並用「空白不敏感」關鍵字匹配。
+    // 例如："失眠 怎麼改善" 應視為可匹配 "失眠怎麼改善"。
     const plainText = text.replace(/<[^>]*>/g, '').replace(/\s+/g, '');
     const totalChars = plainText.length;
 
-    // 計算關鍵字出現次數
-    const regex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    const matches = text.match(regex);
+    const normalizedKeyword = String(keyword || '').replace(/\s+/g, '');
+    const regex = new RegExp(normalizedKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const matches = plainText.match(regex);
     const count = matches ? matches.length : 0;
 
     // 計算密度
@@ -1065,10 +1065,327 @@ class ContentFilterService {
     return issues;
   }
 
+  static detectDomainFromKeyword(keyword) {
+    const text = String(keyword || '').trim();
+    const lower = text.toLowerCase();
+
+    const financeTokens = ['理財', '投資', '股票', 'etf', '基金', '債券', '資產配置', '退休', '保險', '貸款', '信用卡'];
+    const healthTokens = ['失眠', '睡眠', '健康', '飲食', '疼痛', '上背痛', '運動', '疾病', '症狀'];
+
+    if (financeTokens.some((t) => text.includes(t) || lower.includes(t))) return 'finance';
+    if (healthTokens.some((t) => text.includes(t) || lower.includes(t))) return 'health';
+    return 'general';
+  }
+
+  static validateSourcesPresence(article, targetKeyword = '', context = {}) {
+    const issues = [];
+
+    const domain = this.detectDomainFromKeyword(targetKeyword);
+    const sources = article?.content?.introduction?.sources;
+    const count = Array.isArray(sources) ? sources.length : 0;
+
+    // Prefer brief-configured requirement if present.
+    const brief = context?.brief || null;
+    const briefRequireSources = typeof brief?.credibility?.requireSources === 'boolean'
+      ? brief.credibility.requireSources
+      : null;
+    const briefMinSources = Number.isFinite(Number(brief?.credibility?.minSources))
+      ? Number(brief.credibility.minSources)
+      : null;
+
+    // Finance/health content should not ship without any traceable sources.
+    const minSources =
+      briefRequireSources === true
+        ? (briefMinSources != null ? briefMinSources : (domain === 'finance' ? 2 : domain === 'health' ? 1 : 0))
+        : (domain === 'finance' ? 2 : domain === 'health' ? 1 : 0);
+
+    const isRequired = briefRequireSources === true || domain === 'finance' || domain === 'health';
+
+    if (isRequired && minSources > 0 && count < minSources) {
+      issues.push({
+        type: 'missing_sources',
+        text: `sources_count=${count}`,
+        severity: 'error',
+        suggestion: `必須提供至少 ${minSources} 個可追溯來源（官方/監管/專業機構），並在 introduction.sources 中保存。`
+      });
+    }
+
+    return issues;
+  }
+
+  static normalizeWhitespaceInsensitive(text) {
+    return String(text || '').replace(/\s+/g, '');
+  }
+
+  static validateBriefCompliance(article, brief, opts = {}) {
+    const issues = [];
+    if (!brief || typeof brief !== 'object') return issues;
+
+    const outlineTitle = opts?.outlineTitle || '';
+
+    const fullText = [
+      article.content?.introduction?.html || '',
+      ...(article.content?.sections || []).map((s) => s.html || ''),
+      article.content?.conclusion?.html || ''
+    ].join('\n');
+
+    const plain = fullText.replace(/<[^>]*>/g, ' ');
+    const normalizedPlain = this.normalizeWhitespaceInsensitive(plain);
+
+    const mustInclude = Array.isArray(brief?.deliverables?.mustInclude)
+      ? brief.deliverables.mustInclude
+      : [];
+    const briefWantsSteps = mustInclude.some((item) => /step|步驟|流程|checklist/i.test(String(item || '')));
+    const outlinePromisesSteps = /([0-9一二兩三四五六七八九十]{1,3})\s*(步驟|步)/i.test(String(outlineTitle || ''));
+    const allowSteps = briefWantsSteps || outlinePromisesSteps;
+
+    // Deliverables (warning-level; strict gate will treat warnings as failures).
+    for (const item of mustInclude) {
+      const key = String(item || '').trim().toLowerCase();
+      if (!key) continue;
+
+      if (key === 'steps') {
+        const hasOrderedList = /<ol\b[^>]*>/i.test(fullText);
+        const hasStepsWords = /(步驟|step\s*\d+)/i.test(plain);
+        if (!hasOrderedList && !hasStepsWords) {
+          issues.push({
+            type: 'brief_missing_deliverable',
+            text: 'deliverable=steps',
+            severity: 'warning',
+            suggestion: 'Brief 要求「步驟」。建議在正文中加入 3-6 步的 <ol> 清單，讓讀者可直接照做。'
+          });
+        }
+      }
+
+      if (key === 'checklist') {
+        const hasChecklist = /(檢查清單|checklist)/i.test(plain) || /<ul\b[^>]*>/i.test(fullText);
+        if (!hasChecklist) {
+          issues.push({
+            type: 'brief_missing_deliverable',
+            text: 'deliverable=checklist',
+            severity: 'warning',
+            suggestion: 'Brief 要求「清單」。建議在結尾加入「重點檢查清單」<ul>，讓讀者可帶走。'
+          });
+        }
+      }
+
+      if (key === 'comparison_table' || key === 'table') {
+        const hasTable = /<table\b[^>]*>/i.test(fullText) || /(比較表|對照表)/.test(plain);
+        if (!hasTable) {
+          issues.push({
+            type: 'brief_missing_deliverable',
+            text: 'deliverable=comparison_table',
+            severity: 'warning',
+            suggestion: 'Brief 要求「比較表」。建議用 <table> 或清楚的對照清單整理差異，避免只講概念。'
+          });
+        }
+      }
+
+      if (key === 'example') {
+        const hasExample = /(例如|舉例|範例)/.test(plain);
+        if (!hasExample) {
+          issues.push({
+            type: 'brief_missing_deliverable',
+            text: 'deliverable=example',
+            severity: 'warning',
+            suggestion: 'Brief 要求「範例」。建議至少加入 1 個具體情境或示範（不用捏造不可證實的事實）。'
+          });
+        }
+      }
+    }
+
+    // Unrequested step templates (error-level to block template化輸出)。
+    if (!allowSteps) {
+      const stepHeadingPattern = /(第\s*\d+\s*步|步驟\s*\d+|step\s*\d+)/i;
+      const hasStepHeadings = (article.content?.sections || []).some((section) => {
+        if (stepHeadingPattern.test(section?.heading || section?.title || '')) return true;
+        return (section?.subsections || []).some((sub) => stepHeadingPattern.test(sub?.heading || sub?.title || ''));
+      });
+
+      if (hasStepHeadings) {
+        issues.push({
+          type: 'unrequested_steps',
+          text: 'step_headings_present',
+          severity: 'error',
+          suggestion: 'Brief 未要求步驟/流程，但出現「第1步/步驟1/Step 1」式標題。請改為主題式小標或移除數字模板。'
+        });
+      }
+    }
+
+    // Banned phrases.
+    const bannedPhrases = Array.isArray(brief?.author?.bannedPhrases) ? brief.author.bannedPhrases : [];
+    for (const phrase of bannedPhrases) {
+      const p = String(phrase || '').trim();
+      if (!p) continue;
+      if (plain.includes(p)) {
+        issues.push({
+          type: 'brief_banned_phrase',
+          text: p,
+          severity: 'warning',
+          suggestion: `Brief 禁止句型「${p}」。建議移除或改寫為更直接的交付式表達。`
+        });
+      }
+    }
+
+    // Unique angles should appear at least once (soft check).
+    const angles = Array.isArray(brief?.originality?.uniqueAngles) ? brief.originality.uniqueAngles : [];
+    if (angles.length > 0) {
+      const hit = angles.some((a) => {
+        const norm = this.normalizeWhitespaceInsensitive(a);
+        return norm && normalizedPlain.includes(norm);
+      });
+      if (!hit) {
+        issues.push({
+          type: 'brief_unique_angle_missing',
+          text: 'uniqueAngles',
+          severity: 'warning',
+          suggestion: 'Brief 指定了「獨家觀點/框架」，但正文未明顯呼應。建議在至少 1-2 個段落用明確句子把框架講出來。'
+        });
+      }
+    }
+
+    return issues;
+  }
+
+  static validateStepPromise(article, outlineTitle) {
+    const issues = [];
+
+    const parseNum = (token = '') => {
+      const raw = String(token).trim();
+      if (!raw) return null;
+      if (/^\d+$/.test(raw)) return Number(raw);
+      const map = { '零': 0, '一': 1, '二': 2, '兩': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+      if (raw === '十') return 10;
+      if (raw.startsWith('十') && raw.length === 2) return 10 + (map[raw[1]] ?? 0);
+      const tenIdx = raw.indexOf('十');
+      if (tenIdx > 0) {
+        const tens = map[raw[0]];
+        if (tens == null) return null;
+        const onesChar = raw.slice(tenIdx + 1);
+        if (!onesChar) return tens * 10;
+        const ones = map[onesChar];
+        return ones != null ? tens * 10 + ones : null;
+      }
+      return map[raw] ?? null;
+    };
+
+    const extractPromise = (heading = '') => {
+      const text = String(heading).trim();
+
+      // 若是「第X步」僅表示序位，並非承諾 X 個步驟，直接跳過
+      const ordinalStep = /^第\s*(\d+|[一二兩三四五六七八九十]{1,3})\s*步(?:\b|[：:])?/i;
+      if (ordinalStep.test(text)) return null;
+
+      const m = text.match(/(\d+|[一二兩三四五六七八九十]{1,3})\s*(?:大|個)?\s*(陷阱|迷思|錯誤|誤區|疑問|問題|重點|方法|技巧|步驟|步)/);
+      if (!m) return null;
+      const count = parseNum(m[1]);
+      if (!count || count < 2) return null;
+      const kind = m[2];
+      const mapKind = {
+        '陷阱': { kind: 'trap', label: '陷阱' },
+        '迷思': { kind: 'myth', label: '迷思' },
+        '錯誤': { kind: 'mistake', label: '錯誤' },
+        '誤區': { kind: 'mistake', label: '誤區' },
+        '疑問': { kind: 'question', label: '疑問' },
+        '問題': { kind: 'question', label: '問題' },
+        '步驟': { kind: 'step', label: '步驟' },
+        '步': { kind: 'step', label: '步驟' }
+      };
+      return { ...mapKind[kind], count, label: mapKind[kind]?.label || kind };
+    };
+
+    const countDelivered = (html = '', promise) => {
+      const body = String(html || '');
+      if (!promise) return 0;
+      const { label, kind } = promise;
+      if (kind === 'step') {
+        // Accept both 「第X步」與「步驟X」格式
+        const re = /第\s*([0-9一二兩三四五六七八九十]+)\s*步|步驟\s*([0-9一二兩三四五六七八九十]+)/gi;
+        const hits = new Set();
+        let m;
+        while ((m = re.exec(body)) !== null) {
+          const token = m[1] || m[2] || '';
+          const num = parseNum(token);
+          if (num != null) hits.add(num);
+          if (m.index === re.lastIndex) re.lastIndex++;
+        }
+        return hits.size;
+      }
+
+      const hits = new Set();
+      const re = new RegExp(`${label}\s*([0-9一二兩三四五六七八九十]+)\s*(?:[：:]|\s)`, 'gi');
+      let m;
+      while ((m = re.exec(body)) !== null) {
+        const token = m[1] || '';
+        const num = parseNum(token);
+        if (num != null) hits.add(num);
+        if (m.index === re.lastIndex) re.lastIndex++;
+      }
+      return hits.size;
+    };
+
+    const countStepsFromHeadings = (sections = []) => {
+      const hits = new Set();
+      sections.forEach((section) => {
+        const headingText = String(section?.heading || section?.title || '').trim();
+        const re = /第\s*([0-9一二兩三四五六七八九十]+)\s*步|步驟\s*([0-9一二兩三四五六七八九十]+)/gi;
+        let m;
+        while ((m = re.exec(headingText)) !== null) {
+          const token = m[1] || m[2] || '';
+          const num = parseNum(token);
+          if (num != null) hits.add(num);
+          if (m.index === re.lastIndex) re.lastIndex++;
+        }
+      });
+      return hits;
+    };
+
+    const fullHtml = [
+      article.content?.introduction?.html || '',
+      ...(article.content?.sections || []).map((s) => s.html || ''),
+      article.content?.conclusion?.html || ''
+    ].join('\n');
+
+    // 1) 標題層級（例如「3步驟」）
+    const titlePromise = extractPromise(outlineTitle || '');
+    if (titlePromise && titlePromise.kind === 'step') {
+      const deliveredFromHtml = countDelivered(fullHtml, { ...titlePromise, label: '步' });
+      const deliveredFromHeadings = countStepsFromHeadings(article.content?.sections || []);
+      const delivered = Math.max(deliveredFromHtml, deliveredFromHeadings.size);
+      for (let i = 1; i <= titlePromise.count; i++) {
+        if (!delivered || delivered < i) {
+          issues.push({
+            type: 'step_promise_mismatch',
+            text: `missing_step=${i}`,
+            severity: 'error',
+            suggestion: `標題承諾「${titlePromise.count}步驟」，但正文缺少可定位的第${i}步。請用「步驟${i}」或「第${i}步」明確列出。`
+          });
+        }
+      }
+    }
+
+    // 2) 段落層級承諾（陷阱/錯誤/問題/步驟等）
+    (article.content?.sections || []).forEach((section, idx) => {
+      const promise = extractPromise(section.heading || '');
+      if (!promise) return;
+      const delivered = countDelivered(section.html || '', promise);
+      if (delivered < promise.count) {
+        issues.push({
+          type: 'section_promise_mismatch',
+          text: `section=${idx}, heading=${section.heading || ''}, delivered=${delivered}/${promise.count}`,
+          severity: 'error',
+          suggestion: `段落「${section.heading || ''}」承諾 ${promise.count} 個${promise.label}，實際可定位僅 ${delivered} 個。請以 <h3>${promise.label}一/二…</h3> 或「步驟1/2…」形式補齊，讓讀者可快速定位。`
+        });
+      }
+    });
+
+    return issues;
+  }
+
   /**
    * 🆕 綜合品質報告（包含所有檢查）
    */
-  static generateQualityReport(article, targetKeyword = '') {
+  static generateQualityReport(article, targetKeyword = '', context = {}) {
     // ✅ P0修復: 只提取實際HTML內容進行檢測，避免重複計算metadata
     const fullText = [
       article.content?.introduction?.html || '',
@@ -1082,7 +1399,10 @@ class ContentFilterService {
         mechanicalPatterns: this.detectMechanicalPatterns(fullText),
         falseClaims: this.detectFalseClaims(fullText),
         emptyReferences: this.enforceSourceTraceability(fullText),
-        keywordDensity: this.validateKeywordDensity(fullText, targetKeyword)
+        missingSources: this.validateSourcesPresence(article, targetKeyword, context),
+        keywordDensity: this.validateKeywordDensity(fullText, targetKeyword),
+        briefCompliance: this.validateBriefCompliance(article, context?.brief, { outlineTitle: context?.outlineTitle || '' }),
+        stepPromise: this.validateStepPromise(article, context?.outlineTitle)
       },
       summary: {
         totalIssues: 0,

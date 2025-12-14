@@ -13,6 +13,12 @@ const serperHttp = axios.create({
 });
 
 class SerperService {
+  static clampInt(value, min, max, fallback) {
+    const n = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+  }
+
   /**
    * 執行 Google 搜尋（SERP 分析）
    */
@@ -67,15 +73,20 @@ class SerperService {
   /**
    * 分析關鍵字的 SERP 結果（提取競爭對手內容結構）
    */
-  static async analyzeKeyword(keyword) {
+  static async analyzeKeyword(keyword, options = {}) {
     try {
-      const searchResults = await this.search(keyword, { num: 10 });
+      const multiplier = this.clampInt(options.multiplier ?? options.research_multiplier, 1, 4, 1);
+      const baseNum = this.clampInt(options.base_num, 5, 20, 10);
+      const requestedNum = baseNum * multiplier;
+      const usedNum = this.clampInt(requestedNum, 5, 50, 10);
+
+      const searchResults = await this.search(keyword, { num: usedNum });
 
       // 提取有機搜尋結果
       const organicResults = searchResults.organic || [];
 
       // 評估每個結果的可信度與相關性
-      const enrichedResults = organicResults.slice(0, 10).map(result => {
+      const enrichedResults = organicResults.slice(0, usedNum).map(result => {
         const credibilityScore = this.calculateCredibilityScore(result.link);
         const relevanceScore = this.calculateRelevanceScore(keyword, result.title, result.snippet);
         
@@ -106,6 +117,12 @@ class SerperService {
       // 分析結果
       const analysis = {
         keyword,
+        meta: {
+          research_multiplier: multiplier,
+          base_num: baseNum,
+          requested_num: requestedNum,
+          used_num: usedNum
+        },
         totalResults: searchResults.searchInformation?.totalResults || 0,
         topResults: filteredResults,
         allResults: enrichedResults, // 保留所有結果供參考
@@ -130,12 +147,12 @@ class SerperService {
   /**
    * 批量分析多個關鍵字
    */
-  static async analyzeKeywordBatch(keywords, delay = 1000) {
+  static async analyzeKeywordBatch(keywords, delay = 1000, options = {}) {
     const results = [];
 
     for (const keyword of keywords) {
       try {
-        const analysis = await this.analyzeKeyword(keyword);
+        const analysis = await this.analyzeKeyword(keyword, options);
         results.push({
           keyword,
           success: true,

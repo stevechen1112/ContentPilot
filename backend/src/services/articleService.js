@@ -3,17 +3,431 @@ const ContentFilterService = require('./contentFilterService');
 const SEOOptimizer = require('./seoOptimizer');
 const AuthoritySourceService = require('./authoritySourceService');
 const ContentQualityValidator = require('./contentQualityValidator');
+const ContentQualityReportService = require('./contentQualityReportService');
+const {
+  normalizeContentBrief,
+  formatContentBriefForPrompt,
+  validateContentBriefRequiredFields
+} = require('./contentBrief');
 
 class ArticleService {
+  static parseCountTokenToNumber(token) {
+    const raw = String(token || '').trim();
+    if (!raw) return null;
+    if (/^\d+$/.test(raw)) {
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    // Basic Chinese numerals (supports 1-99 for our headline promises)
+    const map = {
+      '零': 0,
+      '一': 1,
+      '二': 2,
+      '兩': 2,
+      '三': 3,
+      '四': 4,
+      '五': 5,
+      '六': 6,
+      '七': 7,
+      '八': 8,
+      '九': 9
+    };
+
+    if (raw === '十') return 10;
+    // e.g. 十一, 十二
+    if (raw.startsWith('十') && raw.length === 2) {
+      const ones = map[raw[1]];
+      return ones != null ? 10 + ones : null;
+    }
+    // e.g. 二十, 二十一
+    const tenIdx = raw.indexOf('十');
+    if (tenIdx > 0) {
+      const tens = map[raw[0]];
+      if (tens == null) return null;
+      const onesChar = raw.slice(tenIdx + 1);
+      if (!onesChar) return tens * 10;
+      const ones = map[onesChar];
+      return ones != null ? tens * 10 + ones : null;
+    }
+    return map[raw] ?? null;
+  }
+
+  static extractCountPromiseFromHeading(heading) {
+    const text = String(heading || '').trim();
+    if (!text) return null;
+
+    // 若是「第X步」僅表示序位（不是承諾 X 個步驟），直接跳過
+    const ordinalStep = /^第\s*(\d+|[一二兩三四五六七八九十]{1,3})\s*步(?:\b|[：:])?/i;
+    if (ordinalStep.test(text)) return null;
+
+    // Patterns like: 3大陷阱 / 5個重點 / 三個方法 / 3步驟
+    const m = text.match(/(\d+|[一二兩三四五六七八九十]{1,3})\s*(?:大|個)?\s*(陷阱|迷思|錯誤|誤區|疑問|問題|重點|方法|技巧|步驟|步)/);
+    if (!m) return null;
+
+    const count = this.parseCountTokenToNumber(m[1]);
+    const kind = m[2];
+    if (!count || count < 2) return null;
+
+    // Map to a label prefix we can verify deterministically.
+    // For traps, we enforce 陷阱一/二/三... headings.
+    if (kind === '陷阱') {
+      return { kind: 'trap', label: '陷阱', count };
+    }
+    if (kind === '迷思') {
+      return { kind: 'myth', label: '迷思', count };
+    }
+    if (kind === '錯誤') {
+      return { kind: 'mistake', label: '錯誤', count };
+    }
+    if (kind === '誤區') {
+      return { kind: 'mistake', label: '誤區', count };
+    }
+    if (kind === '疑問') {
+      return { kind: 'question', label: '疑問', count };
+    }
+    if (kind === '問題') {
+      return { kind: 'question', label: '問題', count };
+    }
+    if (kind === '步驟') {
+      return { kind: 'step', label: '步驟', count };
+    }
+    if (kind === '步') {
+      return { kind: 'step', label: '步驟', count };
+    }
+    // For other kinds, we keep a generic hint but only hard-enforce for traps/myths/mistakes.
+    return { kind: 'generic', label: kind, count };
+  }
+
+  static countLabeledSubheadings(html, label) {
+    const out = String(html || '');
+    const lbl = String(label || '').trim();
+    if (!out || !lbl) return 0;
+
+    // Count unique indexes to avoid double counting repeated headings.
+    const hits = new Set();
+    const re = new RegExp(`<h3>\\s*${lbl}\\s*([0-9]+|[一二三四五六七八九十]+)\\s*(?:[：:]|\\s)`, 'gi');
+    let m;
+    while ((m = re.exec(out)) !== null) {
+      const token = String(m[1] || '').trim();
+      const num = this.parseCountTokenToNumber(token);
+      if (num != null) hits.add(String(num));
+      if (m.index === re.lastIndex) re.lastIndex++;
+    }
+    return hits.size;
+  }
+
+  static buildPromiseGuardForPrompt(sectionHeading, promise) {
+    if (!promise) return '';
+    if (promise.kind === 'trap') {
+      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} 大陷阱」。你必須交付 **剛好 ${promise.count} 個**陷阱，並用 <h3> 子標題標示：\n  - <h3>陷阱一：…</h3>\n  - <h3>陷阱二：…</h3>\n  - …直到 <h3>陷阱${promise.count}：…</h3>\n- 禁止只寫 2 個就收尾，也不要把陷阱塞進段落裡不做子標題。\n`;
+    }
+    if (promise.kind === 'myth') {
+      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} 大迷思」。你必須交付 **剛好 ${promise.count} 個**迷思，並用 <h3> 子標題標示：\n  - <h3>迷思一：…</h3> 直到 <h3>迷思${promise.count}：…</h3>\n`;
+    }
+    if (promise.kind === 'mistake') {
+      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} ${promise.label}」。你必須交付 **剛好 ${promise.count} 個**${promise.label}，並用 <h3> 子標題標示：\n  - <h3>${promise.label}一：…</h3> 直到 <h3>${promise.label}${promise.count}：…</h3>\n`;
+    }
+    if (promise.kind === 'question') {
+      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} 大${promise.label}」。你必須交付 **剛好 ${promise.count} 個**${promise.label}，並用 <h3> 子標題標示：\n  - <h3>${promise.label}一：…</h3>\n  - <h3>${promise.label}二：…</h3>\n  - …直到 <h3>${promise.label}${promise.count}：…</h3>\n- 禁止只寫 2 個就收尾，也不要把第 ${promise.count} 個藏在段落裡不做子標題。\n`;
+    }
+    if (promise.kind === 'step') {
+      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} 步驟」。你必須交付 **剛好 ${promise.count} 個**步驟，並用 <h3> 子標題標示：\n  - <h3>步驟1：…</h3> 直到 <h3>步驟${promise.count}：…</h3>\n`;
+    }
+
+    return `\n## ✅ 承諾交付（提醒）\n- 你的段落標題包含「${promise.count} ${promise.label}」。請確保內容真的交付 ${promise.count} 個要點，避免「說 ${promise.count} 個但只寫 2 個」。\n`;
+  }
+
+  static numberToChineseNumeral(n) {
+    const map = {
+      0: '零',
+      1: '一',
+      2: '二',
+      3: '三',
+      4: '四',
+      5: '五',
+      6: '六',
+      7: '七',
+      8: '八',
+      9: '九',
+      10: '十'
+    };
+    return map[n] || String(n);
+  }
+
+  static extractLabeledOrdinalSet(html, label) {
+    const out = String(html || '');
+    const lbl = String(label || '').trim();
+    const hits = new Set();
+    if (!out || !lbl) return hits;
+
+    const re = new RegExp(`<h3>\\s*${lbl}\\s*([0-9]+|[一二三四五六七八九十]+)\\s*(?:[：:]|\\s)`, 'gi');
+    let m;
+    while ((m = re.exec(out)) !== null) {
+      const token = String(m[1] || '').trim();
+      const num = this.parseCountTokenToNumber(token);
+      if (num != null) hits.add(num);
+      if (m.index === re.lastIndex) re.lastIndex++;
+    }
+    return hits;
+  }
+
+  static async appendMissingPromisedItemsIfNeeded(sectionHeading, html, outline, options) {
+    const promise = this.extractCountPromiseFromHeading(sectionHeading);
+    if (!promise) return html;
+
+    // Hard enforcement for trap/myth/mistake/step only.
+    const enforceable = ['trap', 'myth', 'mistake', 'question', 'step'].includes(promise.kind);
+    if (!enforceable) return html;
+
+    const label = promise.label;
+    const deliveredSet = this.extractLabeledOrdinalSet(html, label);
+    const delivered = deliveredSet.size;
+    if (delivered >= promise.count) return html;
+
+    const missingOrdinals = [];
+    for (let i = 1; i <= promise.count; i++) {
+      if (!deliveredSet.has(i)) missingOrdinals.push(i);
+    }
+    if (missingOrdinals.length === 0) return html;
+
+    const missingCount = missingOrdinals.length;
+    console.log(`   ⚠️  [Promise] 「${sectionHeading}」承諾 ${promise.count} 個${label}，目前只交付 ${delivered} 個，補齊剩餘 ${missingCount} 個...`);
+
+    const { provider } = options || {};
+    const safeProvider = provider || 'openai';
+    const cleanExisting = this.stripLinksAndUrls(String(html || ''));
+
+    const ordinalHeadings = missingOrdinals.map((n) => {
+      if (promise.kind === 'step') return `${label}${n}`;
+      return `${label}${this.numberToChineseNumeral(n)}`;
+    });
+
+    const ordinalExample = promise.kind === 'step'
+      ? `<h3>${label}${missingOrdinals[0]}：…</h3>`
+      : `<h3>${label}${this.numberToChineseNumeral(missingOrdinals[0])}：…</h3>`;
+
+    const promptFixed = `你是一位非常嚴格的資深內容編輯。以下段落標題承諾「${promise.count} 個${label}」，但目前只交付 ${delivered} 個。\n\n## 段落標題（H2）\n${sectionHeading}\n\n## 既有段落 HTML（不要重寫、不要刪改）\n${cleanExisting}\n\n## 你缺少的項目序號\n- ${ordinalHeadings.join('\n- ')}\n\n## 你的任務\n- **只輸出缺少的部分**，用 <h3> 子標題補齊到剛好 ${promise.count} 個。\n- 每個缺少的 ${label} 都要有具體可執行建議（可用 <ul>）。\n- 子標題格式示例：${ordinalExample}\n- **禁止**輸出 H2/H1、禁止 URL、禁止 <a>、禁止 Markdown、禁止引用標記 [1]。\n\n請直接輸出 HTML（只包含新增的 <h3>...）。`;
+
+    try {
+      const result = await AIService.generate(promptFixed, { provider: safeProvider, temperature: 0.3, max_tokens: 900 });
+      let addHtml = this.cleanMarkdownArtifacts(String(result.content || '').trim());
+      addHtml = this.stripLinksAndUrls(addHtml);
+      if (!addHtml) return html;
+
+      const merged = `${cleanExisting}\n${addHtml}`;
+      // Best-effort re-check. If still short, keep merged anyway (do not loop forever).
+      const finalDelivered = this.countLabeledSubheadings(merged, label);
+      if (finalDelivered < promise.count) {
+        console.warn(`   ⚠️  [Promise] 補齊後仍不足（${finalDelivered}/${promise.count}），保留已補內容。`);
+      }
+      return merged;
+    } catch (e) {
+      console.warn(`   ⚠️  [Promise] 補齊失敗，保留原段落: ${e.message}`);
+      return html;
+    }
+  }
+  static redactReferenceFullContent(article) {
+    // Remove potentially large/copyright-sensitive fields from returned outputs.
+    // Keep url/title/snippet/credibility for traceability, but drop fullContent.
+    const visited = new WeakSet();
+
+    const walk = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (visited.has(node)) return;
+      visited.add(node);
+
+      if (Array.isArray(node)) {
+        node.forEach(walk);
+        return;
+      }
+
+      for (const key of Object.keys(node)) {
+        if (key === 'fullContent') {
+          delete node[key];
+          continue;
+        }
+        walk(node[key]);
+      }
+    };
+
+    walk(article);
+    return article;
+  }
+
+  static extractTravelItineraryFromIntroduction(introduction) {
+    const plain = String(introduction?.plain_text || '').trim();
+    const html = String(introduction?.html || '').trim();
+    const text = plain || this.stripHtml(html);
+    if (!text) return '';
+
+    const lines = [];
+    const re = /Day\s*([1-9]\d*)\s*[：:]\s*([^\n]+)/gi;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const day = m[1];
+      const desc = String(m[2] || '').trim();
+      if (day && desc) lines.push(`Day ${day}：${desc}`);
+      if (m.index === re.lastIndex) re.lastIndex++;
+    }
+
+    return lines.join('\n');
+  }
   static detectDomain(outline) {
     const text = `${outline?.keywords?.primary || ''} ${outline?.title || ''}`;
     const lower = text.toLowerCase();
     const financeTokens = ['理財', '投資', '股票', 'etf', '基金', '債券', '資產配置', '退休', '保險', '貸款', '信用卡'];
     const healthTokens = ['失眠', '睡眠', '健康', '飲食', '疼痛', '上背痛', '運動', '疾病', '症狀'];
+    const travelTokens = [
+      '旅遊', '旅行', '自由行', '行程', '行程規劃', '行程安排', '景點', '住宿', '交通', '機票', '飯店',
+      '5天4夜', '4天3夜', '3天2夜',
+      '東京', '大阪', '京都', '沖繩', '札幌', '福岡', '名古屋',
+      'jr', 'metro', '地鐵', '新幹線', '一日券'
+    ];
 
     if (financeTokens.some(t => text.includes(t) || lower.includes(t))) return 'finance';
     if (healthTokens.some(t => text.includes(t) || lower.includes(t))) return 'health';
+    if (travelTokens.some(t => text.includes(t) || lower.includes(t))) return 'travel';
     return 'general';
+  }
+
+  static minSourcesForDomain(domain) {
+    if (domain === 'health') return 2;
+    if (domain === 'finance') return 2;
+    if (domain === 'travel') return 1;
+    return 0;
+  }
+
+  static computeRequiredSources(brief, domain) {
+    const domainMin = this.minSourcesForDomain(domain);
+    const briefRequireSources = brief?.credibility?.requireSources;
+    const briefMin = Number.isFinite(Number(brief?.credibility?.minSources))
+      ? Number(brief.credibility.minSources)
+      : undefined;
+    if (briefRequireSources === false) return 0;
+    return Math.max(domainMin, briefMin ?? 0);
+  }
+
+  static buildSchemaValidation(brief, keyword, domain) {
+    const missing = validateContentBriefRequiredFields(brief || {}, { keyword });
+    return {
+      domain,
+      passed: missing.length === 0,
+      missing
+    };
+  }
+
+  static recomputeQualitySummary(report) {
+    const counts = { error: 0, warn: 0, info: 0, total: 0 };
+    const findings = Array.isArray(report?.findings) ? report.findings : [];
+    findings.forEach((f) => {
+      counts.total += 1;
+      if (f.severity === 'error') counts.error += 1;
+      else if (f.severity === 'warn') counts.warn += 1;
+      else counts.info += 1;
+    });
+
+    report.summary = {
+      total_rules_hit: counts.total || 0,
+      error_rules_hit: counts.error,
+      warn_rules_hit: counts.warn,
+      info_rules_hit: counts.info
+    };
+    report.pass = counts.error === 0;
+    return report;
+  }
+
+  static appendQualityFinding(report, finding) {
+    if (!report.findings) report.findings = [];
+    report.findings.push(finding);
+    return this.recomputeQualitySummary(report);
+  }
+
+  static stripTemplateFooters(article) {
+    const cleanHtml = (html) => {
+      if (!html) return html;
+      let out = String(html);
+      out = out.replace(/<div class="article-footer"[\s\S]*?<\/div>/gi, '');
+      out = out.replace(/<hr\s*\/>\s*$/gi, '').trim();
+      return out;
+    };
+
+    if (article?.content?.introduction?.html) {
+      const html = cleanHtml(article.content.introduction.html);
+      article.content.introduction.html = html;
+      article.content.introduction.plain_text = this.stripHtml(html);
+    }
+
+    if (Array.isArray(article?.content?.sections)) {
+      article.content.sections = article.content.sections.map((s) => {
+        if (!s?.html) return s;
+        const html = cleanHtml(s.html);
+        return { ...s, html, plain_text: this.stripHtml(html) };
+      });
+    }
+
+    if (article?.content?.conclusion?.html) {
+      const html = cleanHtml(article.content.conclusion.html);
+      article.content.conclusion.html = html;
+      article.content.conclusion.plain_text = this.stripHtml(html);
+    }
+
+    return article;
+  }
+
+  static evaluateActionSafety(article, domain) {
+    const segments = [];
+    if (article?.content?.introduction?.html) segments.push(article.content.introduction.html);
+    if (Array.isArray(article?.content?.sections)) {
+      article.content.sections.forEach((s) => s?.html && segments.push(s.html));
+    }
+    if (article?.content?.conclusion?.html) segments.push(article.content.conclusion.html);
+
+    const joinedHtml = segments.join('\n');
+    const text = this.stripHtml(joinedHtml);
+
+    const actionHeading = /<h3[^>]*>[^<]{0,40}(行動|步驟|清單|操作|流程|做法|指南)[^<]*<\/h3>/i.test(joinedHtml);
+    const actionList = /<(ol|ul)[^>]*>/i.test(joinedHtml);
+    const actionKeyword = /(行動|步驟|清單|操作|練習|計畫|流程)/.test(text);
+    const action_block = Boolean(actionList && (actionHeading || actionKeyword));
+
+    const safetyHeading = /<h3[^>]*>[^<]{0,40}(風險|安全|禁忌|就醫|注意|副作用|停止|不適)[^<]*<\/h3>/i.test(joinedHtml);
+    const safetyKeyword = /(風險|禁忌|就醫|醫師|醫療|安全|停止|不適|副作用)/.test(text);
+    const safety_block = domain === 'health' ? Boolean(safetyHeading || safetyKeyword) : true;
+
+    return { domain, action_block, safety_block };
+  }
+
+  static buildSourceAvailability(verifiedSources, minRequired, domain) {
+    const available = Array.isArray(verifiedSources) ? verifiedSources.length : 0;
+    return {
+      domain,
+      required: minRequired,
+      available,
+      passed: available >= minRequired
+    };
+  }
+
+  static computeSourceCoverage(article, verifiedSources, domain, minRequired) {
+    const sections = Array.isArray(article?.content?.sections) ? article.content.sections : [];
+    const available = Array.isArray(verifiedSources) ? verifiedSources.length : 0;
+    const coverageCount = Math.min(available, sections.length || available || 0);
+    const coverageRatio = sections.length ? coverageCount / sections.length : 1;
+    const requiredCoverage = domain === 'health'
+      ? Math.min(sections.length || 1, Math.max(minRequired, 2))
+      : Math.min(sections.length || 1, Math.max(minRequired, 1));
+
+    const passed = available >= minRequired && coverageCount >= requiredCoverage;
+
+    return {
+      domain,
+      required: minRequired,
+      available,
+      coverageCount,
+      coverageRatio,
+      requiredCoverage,
+      passed
+    };
   }
 
   static pickPeopleAlsoAskQuestions(outline, serp_data) {
@@ -52,9 +466,118 @@ class ArticleService {
     return unique;
   }
 
+  static extractTravelTopicFromKeyword(keyword) {
+    const s = String(keyword || '').trim();
+    if (!s) return '';
+
+    // Prefer destination names that appear before common travel intent tokens.
+    // Examples:
+    // - 東京自由行 5天4夜 行程規劃 -> 東京
+    // - 大阪 3天2夜 行程 -> 大阪
+    const m = s.match(/([\u4e00-\u9fff]{1,8})\s*(?:自由行|旅遊|旅行|行程|景點|攻略)/);
+    if (m && m[1]) return String(m[1]).trim();
+
+    // Fallback: first CJK chunk.
+    const m2 = s.match(/([\u4e00-\u9fff]{1,8})/);
+    if (m2 && m2[1]) return String(m2[1]).trim();
+
+    return '';
+  }
+
+  static extractFaqTopicFromKeyword(keyword) {
+    const raw = String(keyword || '').trim();
+    if (!raw) return '';
+
+    // Normalize whitespace first.
+    let s = raw.replace(/\s+/g, ' ').trim();
+
+    // If the keyword contains an explicit "how/what" intent tail, keep the part before it.
+    // Examples:
+    // - 失眠 怎麼改善 -> 失眠
+    // - iPhone 備份到電腦 怎麼做 -> iPhone 備份到電腦
+    // - XXX 如何... -> XXX
+    const intentCut = s.match(/^(.*?)(?:\s*(?:怎麼做|怎麼辦|怎麼改善|怎麼選|怎麼看|怎麼寫|怎麼講|如何|怎樣)\b.*)?$/);
+    if (intentCut && intentCut[1]) {
+      s = String(intentCut[1]).trim();
+    }
+
+    // Remove common SEO suffixes that should not be repeated verbatim in every FAQ title.
+    s = s
+      .replace(/\s*(?:完整攻略|完整指南|新手必讀|懶人包|攻略|教學|入門)\s*$/g, '')
+      .replace(/\s*(?:範例與架構|範例|架構|流程|步驟|方法)\s*$/g, '')
+      .trim();
+
+    // Final fallback: if stripping removed everything, return the original.
+    return s || raw.replace(/\s+/g, ' ').trim();
+  }
+
+  static normalizeTravelFaqQuestion(question, outline) {
+    let q = String(question || '').trim();
+    if (!q) return '';
+
+    const primaryKeyword = String(outline?.keywords?.primary || '').trim();
+    const topic = this.extractTravelTopicFromKeyword(primaryKeyword || outline?.title || '') || '';
+
+    // If the question contains the full primary keyword, replace it with a short topic (e.g. 東京).
+    if (primaryKeyword && q.includes(primaryKeyword)) {
+      q = q.split(primaryKeyword).join(topic || '');
+    }
+
+    // Light cleanup for common awkward remnants.
+    q = q.replace(/\s+/g, ' ').trim();
+    q = q.replace(/^新手排\s+/, '新手 ');
+    q = q.replace(/\s+\?/g, '?').replace(/\s+？/g, '？');
+
+    // If we replaced to empty and left a leading connector, trim again.
+    q = q.replace(/^[-–—:：]+\s*/, '').trim();
+
+    return q;
+  }
+
+  static normalizeTravelFaqHeadingsHtml(html, outline) {
+    let out = String(html || '');
+    if (!out) return out;
+
+    const primaryKeyword = String(outline?.keywords?.primary || '').trim();
+    const topic = this.extractTravelTopicFromKeyword(primaryKeyword || outline?.title || '') || '';
+    const primaryKeywordCollapsed = primaryKeyword ? primaryKeyword.replace(/\s+/g, '') : '';
+
+    // Deterministic safety net: only touches <h3> question titles.
+    out = out.replace(/<h3>([\s\S]*?)<\/h3>/gi, (_m, inner) => {
+      let t = String(inner || '');
+
+      if (primaryKeyword && t.includes(primaryKeyword)) {
+        t = t.split(primaryKeyword).join(topic || '');
+      }
+
+      // Handle cases where the model removes spaces inside the keyword.
+      if (primaryKeywordCollapsed && t.includes(primaryKeywordCollapsed)) {
+        t = t.split(primaryKeywordCollapsed).join(topic || '');
+      }
+
+      // Normalize whitespace.
+      t = t.replace(/\s+/g, ' ').trim();
+      // Ensure numbering has a single space: "1." -> "1. "
+      t = t.replace(/^(\d+)\.\s*/, '$1. ');
+      // Avoid duplicate topic: "東京 東京..." -> "東京..."
+      if (topic) {
+        const dup = new RegExp(`${topic}\\s+${topic}`, 'g');
+        t = t.replace(dup, topic);
+      }
+
+      return `<h3>${t}</h3>`;
+    });
+
+    return out;
+  }
+
   static buildFallbackFaqQuestions(outline, contentDomain) {
     const kw = (outline?.keywords?.primary || outline?.title || '').toString().trim();
     if (!kw) return [];
+
+    const topic = contentDomain === 'travel'
+      ? this.extractTravelTopicFromKeyword(kw) || kw
+      : this.extractFaqTopicFromKeyword(kw) || kw;
 
     if (contentDomain === 'finance') {
       return [
@@ -68,21 +591,130 @@ class ArticleService {
 
     if (contentDomain === 'health') {
       return [
-        `${kw} 常見原因是什麼？`,
-        `${kw} 有哪些先做的自我檢查？`,
-        `${kw} 什麼情況需要就醫？`,
-        `${kw} 有哪些居家改善方法？`,
-        `${kw} 有哪些常見迷思需要避免？`
+        `${topic} 常見原因是什麼？`,
+        `${topic} 有哪些先做的自我檢查？`,
+        `${topic} 什麼情況需要就醫？`,
+        `${topic} 有哪些居家改善方法？`,
+        `${topic} 有哪些常見迷思需要避免？`
+      ];
+    }
+
+    if (contentDomain === 'travel') {
+      const topic = this.extractTravelTopicFromKeyword(kw);
+      const topicPrefix = topic ? `${topic}` : '';
+      return [
+        `${topicPrefix ? `${topicPrefix} ` : ''}行程要怎麼排比較順？`,
+        `${topicPrefix ? `第一次去${topicPrefix}，` : ''}新手最容易踩的雷是什麼？`,
+        `${topicPrefix ? `${topicPrefix} ` : ''}交通票券要怎麼選？`,
+        `${topicPrefix ? `${topicPrefix} ` : ''}住宿選哪個區域比較方便？`,
+        `${topicPrefix ? `${topicPrefix} ` : ''}預算大概要抓多少？`
       ];
     }
 
     return [
-      `${kw} 是什麼？`,
-      `${kw} 新手該如何開始？`,
-      `${kw} 有哪些常見錯誤？`,
-      `${kw} 需要準備哪些工具或資料？`,
-      `${kw} 如何評估效果與調整？`
+      `${topic} 是什麼？`,
+      `新手開始「${topic}」時，第一步該做什麼？`,
+      `${topic} 有哪些常見錯誤？`,
+      `${topic} 需要準備哪些工具或資料？`,
+      `${topic} 如何評估效果與調整？`
     ];
+  }
+
+  static normalizeFaqHeadingsHtml(html, outline, contentDomain = 'general') {
+    let out = String(html || '');
+    if (!out) return out;
+
+    const primaryKeyword = String(outline?.keywords?.primary || '').trim();
+    const primaryKeywordCollapsed = primaryKeyword ? primaryKeyword.replace(/\s+/g, '') : '';
+
+    const topic = contentDomain === 'travel'
+      ? (this.extractTravelTopicFromKeyword(primaryKeyword || outline?.title || '') || '')
+      : (this.extractFaqTopicFromKeyword(primaryKeyword || outline?.title || '') || '');
+
+    const collapse = (s) => String(s || '').replace(/[\s_]+/g, '').trim();
+
+    // Deterministic safety net: only touches <h3> question titles.
+    out = out.replace(/<h3>([\s\S]*?)<\/h3>/gi, (_m, inner) => {
+      let t = String(inner || '');
+
+      // 1) Try to shorten the subject phrase based on common question cues.
+      // Example: "面試自我介紹 範例與架構 是什麼？" -> "面試自我介紹 是什麼？"
+      // This is intentionally domain-agnostic and does not rely on outline.keyword being long.
+      {
+        const m = t.match(/^\s*(\d+)\.\s*([\s\S]*)$/);
+        const numberPrefix = m ? `${m[1]}. ` : '';
+        let body = (m ? m[2] : t).trim();
+
+        const cues = [
+          '是什麼',
+          '新手',
+          '有哪些',
+          '需要',
+          '該如何',
+          '如何',
+          '怎麼',
+          '要怎麼',
+          '怎樣'
+        ];
+
+        let cutIdx = -1;
+        for (const cue of cues) {
+          const idx = body.indexOf(cue);
+          if (idx > 0 && (cutIdx === -1 || idx < cutIdx)) cutIdx = idx;
+        }
+
+        if (cutIdx > 0) {
+          const subject = body.slice(0, cutIdx).trim();
+          const slim = this.extractFaqTopicFromKeyword(subject);
+          if (slim && slim.length > 0 && slim.length < subject.length) {
+            body = `${slim}${body.slice(cutIdx)}`;
+            t = `${numberPrefix}${body}`;
+          }
+        }
+      }
+
+      // If the heading begins with a keyword-like prefix (even with different spacing), replace it.
+      // This targets the common bad pattern: "<keyword> 是什麼？" / "<keyword> 新手怎麼開始？" etc.
+      if (topic && primaryKeywordCollapsed) {
+        const m = t.match(/^\s*(\d+)\.\s*([\s\S]*)$/);
+        const numberPrefix = m ? `${m[1]}. ` : '';
+        const body = (m ? m[2] : t).trim();
+        const bodyCollapsed = collapse(body);
+
+        if (bodyCollapsed.startsWith(primaryKeywordCollapsed)) {
+          let acc = '';
+          for (let i = 0; i < body.length; i++) {
+            acc += body[i];
+            const accCollapsed = collapse(acc);
+            if (accCollapsed.length >= primaryKeywordCollapsed.length) {
+              if (accCollapsed.slice(0, primaryKeywordCollapsed.length) === primaryKeywordCollapsed) {
+                const replacedBody = `${topic}${body.slice(i + 1)}`;
+                t = `${numberPrefix}${replacedBody}`;
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      if (topic) {
+        if (primaryKeyword && t.includes(primaryKeyword)) {
+          t = t.split(primaryKeyword).join(topic);
+        }
+        // Also handle cases where the heading contains a whitespace-free keyword string.
+        if (primaryKeywordCollapsed && t.includes(primaryKeywordCollapsed)) {
+          t = t.split(primaryKeywordCollapsed).join(topic);
+        }
+      }
+
+      t = t.replace(/\s+/g, ' ').trim();
+      t = t.replace(/^(\d+)\.\s*/, '$1. ');
+      t = t.replace(/\s+\?/g, '?').replace(/\s+？/g, '？');
+
+      return `<h3>${t}</h3>`;
+    });
+
+    return out;
   }
 
   static stripLinksAndUrls(html) {
@@ -93,6 +725,34 @@ class ArticleService {
     // Remove any raw URLs that may appear in text
     out = out.replace(/https?:\/\/[^\s"'<>]+/gi, '');
     return out;
+  }
+
+  /**
+   * Final pass: remove anchors/URLs in all article blocks and refresh plain_text.
+   */
+  static sanitizeArticleLinks(article) {
+    if (!article?.content) return article;
+
+    const sanitizeBlock = (block) => {
+      if (!block) return block;
+      const next = { ...block };
+      if (next.html) next.html = this.stripLinksAndUrls(next.html);
+      if (next.plain_text) next.plain_text = this.stripLinksAndUrls(next.plain_text);
+      if (next.html) next.plain_text = this.stripHtml(next.html);
+      return next;
+    };
+
+    const content = article.content;
+    if (content.introduction) {
+      content.introduction = sanitizeBlock(content.introduction);
+    }
+    if (Array.isArray(content.sections)) {
+      content.sections = content.sections.map((s) => sanitizeBlock(s));
+    }
+    if (content.conclusion) {
+      content.conclusion = sanitizeBlock(content.conclusion);
+    }
+    return article;
   }
 
   static hasUnsupportedStatClaims(html) {
@@ -141,7 +801,7 @@ ${html}
   static async generateArticle(outline, options = {}) {
     try {
       const {
-        provider = 'gemini',
+        provider = process.env.AI_PROVIDER || 'openai',
         style_guide = null,
         additional_context = null,
         serp_data = null,
@@ -150,12 +810,61 @@ ${html}
         target_audience,
         unique_angle,
         expected_outline,
-        personal_experience
+        personal_experience,
+        brief
       } = options;
 
       console.log('📝 開始生成文章...');
 
       const contentDomain = this.detectDomain(outline);
+
+      const normalizedBriefForValidation = normalizeContentBrief(
+        {
+          brief,
+          keyword: outline?.keywords?.primary || outline?.title,
+          tone: style_guide?.tone,
+          target_audience,
+          author_bio,
+          author_values,
+          unique_angle,
+          expected_outline,
+          personal_experience
+        },
+        { applyDefaults: false, domain: contentDomain }
+      );
+
+      const schemaCheck = this.buildSchemaValidation(
+        normalizedBriefForValidation,
+        outline?.keywords?.primary || outline?.title || '',
+        contentDomain
+      );
+
+      const normalizedBrief = normalizeContentBrief(
+        {
+          brief,
+          keyword: outline?.keywords?.primary || outline?.title,
+          tone: style_guide?.tone,
+          target_audience,
+          author_bio,
+          author_values,
+          unique_angle,
+          expected_outline,
+          personal_experience
+        },
+        { applyDefaults: Boolean(brief), domain: contentDomain }
+      );
+
+      const briefBlock = formatContentBriefForPrompt(normalizedBrief);
+      const effectiveTone = normalizedBrief?.author?.tone || style_guide?.tone;
+      const effectiveStyleGuide = effectiveTone ? { ...(style_guide || {}), tone: effectiveTone } : style_guide;
+
+      const effectiveAuthorBio = normalizedBrief?.author?.identity || author_bio;
+      const effectiveAuthorValues = (normalizedBrief?.author?.values || []).join('、') || author_values;
+      const effectiveAudience = normalizedBrief?.targetAudience?.scenario || target_audience;
+      const effectiveUniqueAngle = (normalizedBrief?.originality?.uniqueAngles || []).join('、') || unique_angle;
+      const effectiveExpectedOutline = normalizedBrief?.expectedOutline || expected_outline;
+      const effectivePersonalExperience = normalizedBrief?.originality?.allowedCaseNotes || personal_experience;
+      const minSourcesRequired = this.computeRequiredSources(normalizedBrief, contentDomain);
 
       // 🆕 RAG 架構：預先檢索權威來源 (LibrarianService)
       // 確保整篇文章使用同一組驗證過的來源，避免重複檢索與不一致
@@ -164,36 +873,54 @@ ${html}
       const verifiedSources = await LibrarianService.getVerifiedSources(outline.title || outline.keywords?.primary);
       console.log(`✅ [Librarian] 獲取 ${verifiedSources.length} 個驗證來源`);
 
+      const sourceAvailability = this.buildSourceAvailability(verifiedSources, minSourcesRequired, contentDomain);
+      if (!sourceAvailability.passed) {
+        const err = new Error(`source_minimum_not_met: 需要至少 ${minSourcesRequired} 個來源，實得 ${sourceAvailability.available}`);
+        err.code = 'SOURCE_MINIMUM_NOT_MET';
+        throw err;
+      }
+
       // 逐段生成文章
       // 全面使用 Gemini 模型
       console.log(`🤖 模型策略: 全面使用 ${provider}`);
 
       const introduction = await this.generateIntroduction(outline, { 
         provider, 
-        style_guide,
+        style_guide: effectiveStyleGuide,
         serp_data,
+        contentDomain,
         verifiedSources, // 傳遞來源
-        author_bio,
-        author_values,
-        target_audience,
-        unique_angle,
-        expected_outline,
-        personal_experience
+        author_bio: effectiveAuthorBio,
+        author_values: effectiveAuthorValues,
+        target_audience: effectiveAudience,
+        unique_angle: effectiveUniqueAngle,
+        expected_outline: effectiveExpectedOutline,
+        personal_experience: effectivePersonalExperience,
+        brief: normalizedBrief,
+        briefBlock
       });
+
+      const travelItinerary = contentDomain === 'travel'
+        ? this.extractTravelItineraryFromIntroduction(introduction)
+        : '';
 
       const sections = [];
       for (const section of outline.sections || []) {
         const sectionContent = await this.generateSection(section, outline, { 
           provider, 
-          style_guide,
+          style_guide: effectiveStyleGuide,
           serp_data,
+          contentDomain,
           verifiedSources, // 傳遞來源
-          author_bio,
-          author_values,
-          target_audience,
-          unique_angle,
-          expected_outline,
-          personal_experience
+          travelItinerary,
+          author_bio: effectiveAuthorBio,
+          author_values: effectiveAuthorValues,
+          target_audience: effectiveAudience,
+          unique_angle: effectiveUniqueAngle,
+          expected_outline: effectiveExpectedOutline,
+          personal_experience: effectivePersonalExperience,
+          brief: normalizedBrief,
+          briefBlock
         });
         sections.push(sectionContent);
 
@@ -209,32 +936,46 @@ ${html}
       if (faqQuestions.length > 0) {
         const faqSection = await this.generateFaqSection(faqQuestions, outline, {
           provider,
-          style_guide,
+          style_guide: effectiveStyleGuide,
           serp_data,
+          contentDomain,
           verifiedSources,
-          author_bio,
-          author_values,
-          target_audience,
-          unique_angle,
-          expected_outline,
-          personal_experience
+          travelItinerary,
+          author_bio: effectiveAuthorBio,
+          author_values: effectiveAuthorValues,
+          target_audience: effectiveAudience,
+          unique_angle: effectiveUniqueAngle,
+          expected_outline: effectiveExpectedOutline,
+          personal_experience: effectivePersonalExperience,
+          brief: normalizedBrief,
+          briefBlock
         });
         sections.push(faqSection);
       }
 
       const conclusion = await this.generateConclusion(outline, sections, { 
         provider, 
-        style_guide,
+        style_guide: effectiveStyleGuide,
+        contentDomain,
         verifiedSources, // 傳遞來源
-        author_bio,
-        author_values,
-        target_audience,
-        unique_angle,
-        personal_experience
+        travelItinerary,
+        author_bio: effectiveAuthorBio,
+        author_values: effectiveAuthorValues,
+        target_audience: effectiveAudience,
+        unique_angle: effectiveUniqueAngle,
+        personal_experience: effectivePersonalExperience,
+        brief: normalizedBrief,
+        briefBlock
       });
 
       // 保障標題與 meta 有值，避免 undefined 注入到 HTML
-      const { title: safeTitle, meta_description: safeMeta } = this.resolveTitleMeta(outline);
+      const { title: safeTitle, meta_description: safeMeta } = this.resolveTitleMeta(
+        outline,
+        outline?.keywords?.primary || outline?.keyword || '',
+        contentDomain
+      );
+
+      const primaryKeyword = outline.keywords?.primary || outline.keyword || outline.title || '';
 
       // 組合完整文章
       let fullArticle = {
@@ -256,7 +997,10 @@ ${html}
       console.log('🧹 開始應用內容過濾器...');
       fullArticle = await ContentFilterService.cleanContent(fullArticle, { 
         domain: contentDomain,
-        skipHTML: false 
+        skipHTML: false,
+        keyword: primaryKeyword,
+        brief: normalizedBrief,
+        outlineTitle: outline?.title || ''
       });
       console.log('✅ 內容過濾完成');
 
@@ -276,18 +1020,27 @@ ${html}
       });
       console.log('✅ SEO 驗證完成');
 
+      // Redact deep-reading raw content from outputs to avoid leaking long source text.
+      fullArticle = this.redactReferenceFullContent(fullArticle);
+
       // 🆕 P1優化：增強 E-E-A-T (添加領域感知的作者簡介與免責聲明)
       if (fullArticle.content?.conclusion?.html) {
         const domain = this.determineDomain(outline.title);
-        const disclaimer = this.generateDomainAwareDisclaimer(domain);
+        const disclaimer = this.generateDomainAwareDisclaimer(domain, verifiedSources || []);
         
         fullArticle.content.conclusion.html += disclaimer;
         fullArticle.content.conclusion.plain_text += this.stripHtml(disclaimer);
       }
 
       // 🆕 P2: 確保目標關鍵字至少出現 2 次，避免密度為 0
-      const targetKeyword = outline.keywords?.primary || outline.title;
+      const targetKeyword = primaryKeyword;
       fullArticle = this.ensureKeywordPresence(fullArticle, targetKeyword);
+
+      // 🆕 Final scrub: 移除殘留 <a>/URL，避免格式規則被破壞
+      fullArticle = this.sanitizeArticleLinks(fullArticle);
+
+      // 🆕 去除模板化 footer，避免重複聲明污染結尾
+      fullArticle = this.stripTemplateFooters(fullArticle);
 
       // 🆕 P5: RAG 架構最終檢查 (Librarian Check)
       // 雖然我們在生成階段已經使用了 LibrarianService，但為了雙重保險，
@@ -345,6 +1098,150 @@ ${html}
 
       console.log(`\n✅ [P5驗證完成] 總計: ${totalValidUrls}個有效URL, ${totalInvalidUrls}個幻覺URL已清理\n`);
 
+      // 🆕 Quality Stage: deterministic report (for gating + debugging)
+      const deterministicReport = ContentQualityReportService.generateReport(fullArticle, {
+        domain: contentDomain
+      });
+
+      // Keep existing heuristic checks (mechanical patterns, traceability, keyword density)
+      try {
+        deterministicReport.heuristics = ContentFilterService.generateQualityReport(
+          fullArticle,
+          outline.keywords?.primary || outline.title || '',
+          { brief: normalizedBrief, outlineTitle: outline?.title || '' }
+        );
+      } catch (e) {
+        deterministicReport.heuristics = {
+          passed: false,
+          error: 'failed_to_generate_heuristics_report'
+        };
+      }
+
+      // Make the top-level pass reflect both rule-based findings and heuristic checks.
+      if (deterministicReport.heuristics && typeof deterministicReport.heuristics.passed === 'boolean') {
+        deterministicReport.pass = Boolean(deterministicReport.pass && deterministicReport.heuristics.passed);
+      }
+
+      // 🆕 Reader/editor evaluation loop (from backend/docs/CONTENT_EVALUATION_PROMPT.md)
+      // Opt-in via options.enable_reader_evaluation / options.enableReaderEvaluation or env ENABLE_READER_EVALUATION=true.
+      try {
+        const envRaw = String(process.env.ENABLE_READER_EVALUATION || '').trim().toLowerCase();
+        const envDefault = envRaw === '' ? true : envRaw === 'true';
+        const optFlag =
+          options?.enable_reader_evaluation ?? options?.enableReaderEvaluation;
+        const enable = optFlag === false ? false : optFlag === true ? true : envDefault;
+
+        if (enable) {
+          const ReaderEvaluationService = require('./readerEvaluationService');
+          const taText =
+            normalizedBrief?.targetAudience?.scenario ||
+            normalizedBrief?.targetAudience?.level ||
+            target_audience ||
+            '';
+
+          deterministicReport.reader_evaluation = await ReaderEvaluationService.evaluateArticle({
+            keyword: outline?.keywords?.primary || outline?.title || '',
+            ta: taText,
+            brief: normalizedBrief,
+            title: fullArticle?.title || outline?.title || '',
+            contentHtml: allHtml,
+            provider
+          });
+        }
+      } catch (e) {
+        deterministicReport.reader_evaluation = {
+          error: 'failed_to_run_reader_evaluation',
+          message: e?.message || String(e)
+        };
+      }
+
+      const actionSafetyCheck = this.evaluateActionSafety(fullArticle, contentDomain);
+      const sourceCoverage = this.computeSourceCoverage(fullArticle, verifiedSources, contentDomain, minSourcesRequired);
+
+      deterministicReport.checks = {
+        ...(deterministicReport.checks || {}),
+        schema: schemaCheck,
+        source_minimum: sourceAvailability,
+        source_coverage: sourceCoverage,
+        action_safety: actionSafetyCheck,
+        reader_evaluation: deterministicReport.reader_evaluation || null
+      };
+
+      if (!schemaCheck.passed) {
+        this.appendQualityFinding(deterministicReport, {
+          rule_id: 'schema.required_fields',
+          severity: 'error',
+          message: '內容 brief 缺少必填欄位，請補齊再生成',
+          total_count: schemaCheck.missing.length,
+          fields: schemaCheck.missing.map((m) => ({ field: m.field, count: 1, samples: [m.message] }))
+        });
+      }
+
+      if (!sourceAvailability.passed) {
+        this.appendQualityFinding(deterministicReport, {
+          rule_id: 'source.min_required',
+          severity: 'error',
+          message: `來源不足，需至少 ${sourceAvailability.required} 個可信來源` ,
+          total_count: 1,
+          fields: [{ field: 'sources', count: 1, samples: [`available=${sourceAvailability.available}`] }]
+        });
+      }
+
+      if (!sourceCoverage.passed) {
+        this.appendQualityFinding(deterministicReport, {
+          rule_id: 'source.coverage',
+          severity: contentDomain === 'health' ? 'error' : 'warn',
+          message: '來源覆蓋不足，需覆蓋核心段落並達到最低來源數',
+          total_count: 1,
+          fields: [{
+            field: 'sources.coverage',
+            count: 1,
+            samples: [`available=${sourceCoverage.available}, coverage=${sourceCoverage.coverageRatio.toFixed(2)}`]
+          }]
+        });
+      }
+
+      if (!actionSafetyCheck.action_block) {
+        this.appendQualityFinding(deterministicReport, {
+          rule_id: 'action.framework.missing',
+          severity: 'error',
+          message: '缺少行動框架/可執行步驟，請加入具體清單或流程',
+          total_count: 1,
+          fields: [{ field: 'content', count: 1, samples: ['需要至少一個含步驟/清單的行動段落'] }]
+        });
+      }
+
+      if (!actionSafetyCheck.safety_block) {
+        this.appendQualityFinding(deterministicReport, {
+          rule_id: 'safety.missing',
+          severity: contentDomain === 'health' ? 'error' : 'warn',
+          message: '缺少安全/禁忌/就醫提示，請在相關段落補充',
+          total_count: 1,
+          fields: [{ field: 'content', count: 1, samples: ['需有風險/禁忌/何時就醫等提示'] }]
+        });
+      }
+
+      const readerScores = deterministicReport.reader_evaluation?.parsed || null;
+
+      fullArticle.quality_score = readerScores?.total ?? null;
+      fullArticle.eeat_score = readerScores?.persuasiveness ?? null;
+      fullArticle.seo_score = readerScores?.seo ?? null;
+
+      fullArticle.metadata = {
+        ...(fullArticle.metadata || {}),
+        domain: contentDomain,
+        sources: {
+          required: minSourcesRequired,
+          available: sourceAvailability.available,
+          coverageCount: sourceCoverage.coverageCount,
+          coverageRatio: sourceCoverage.coverageRatio
+        },
+        checks: deterministicReport.checks,
+        reader_scores: readerScores
+      };
+
+      fullArticle.quality_report = deterministicReport;
+
       return fullArticle;
     } catch (error) {
       console.error('Generate article error:', error);
@@ -356,7 +1253,7 @@ ${html}
    * 生成引言段落
    */
   static async generateIntroduction(outline, options = {}) {
-    const { provider, style_guide, serp_data, verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, expected_outline, personal_experience } = options;
+    const { provider, style_guide, serp_data, contentDomain = 'general', verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, expected_outline, personal_experience, brief, briefBlock } = options;
 
     console.log('🔍 [Librarian] 正在檢索權威來源...');
     
@@ -372,7 +1269,25 @@ ${html}
     // 熱門關鍵詞（來自競爭對手內容分析）
     const topKeywords = serp_data?.contentPatterns?.topSnippetKeywords?.slice(0, 8).map(k => k.word).join('、') || '';
 
-    const prompt = `你是一位擁有 10 年以上經驗的領域專家與 SEO 內容寫手。請根據以下大綱，撰寫文章的引言部分。
+      const travelDeliverable = contentDomain === 'travel' ? `
+  ## 🧳 旅遊文章交付物（必須做到，避免模板文）
+  1. **開場先交付，不要鋪陳**：第一段第一句不要用問句（例如「你是否曾…」），不要用情緒鋪陳；直接一句話帶出「你可以直接照抄的 5 天快覽」。
+      - **加強版**：第一句也不要用「想要…但不知從何開始？」這種套話。
+  2. **先給可直接照做的行程快覽**：引言中必須包含一段 <ul> 行程清單，至少 3 天（若題目是「5天4夜」就請寫 Day1～Day5）。
+    - 每天至少 1 句：地區/主軸 + 2-3 個行動點（景點/吃什麼/怎麼移動/備案）。
+  3. **先交代行程假設**：用 3-5 個要點講清楚：季節/抵達時間大概落點/住宿區域建議/同行者（親子/情侶/朋友）/步調（輕鬆或衝刺）。
+    4. **不要寫「本文將/在這篇文章中/在這篇《…》中」**：直接把行程與決策重點端出來。
+    5. **自我檢查（必做）**：輸出前請快速檢查：
+      - 不要有任何「在這篇」起頭的句子
+      - 不要有任何開場問句
+      若不符合，請自行重寫直到符合。
+  ` : '';
+
+      const normalizedBriefBlock = briefBlock || formatContentBriefForPrompt(brief);
+
+    const prompt = `你是一位擁有 10 年以上經驗的領域專家與內容寫手。請根據以下大綱，撰寫文章的引言部分。目標是讓讀者看完引言就能開始執行，而不是只覺得「講得很對」。
+
+  ${normalizedBriefBlock}
 
 ## 文章標題
 ${outline.title}
@@ -406,10 +1321,13 @@ ${expected_outline ? `## 期望涵蓋的大綱/重點（需呼應）
 ${expected_outline}
 ` : ''}
 
+${travelDeliverable}
+
 ## 寫作要求
 1. **專業但誠實**：使用第三人稱或客觀描述，避免虛構個人經驗。
 2. **痛點共鳴**：開場直接切入讀者痛點，可用情境/例子/普遍觀察；**不要硬塞百分比統計**。
-3. 清楚說明本文將提供什麼價值
+3. **直接交付價值**：用一兩句話說清楚讀者會拿到什麼（例如：行程快覽、決策順序、避免踩雷清單）。
+4. **避免模板問句開場**：不要用「你是否也曾/是否也曾/你是不是也…」這類問句起手式，直接陳述情境與行動。
 4. **稱呼一致**：全篇一律使用「你／你的」，不要使用「您／您的」。
 5. **避免口號句**：不要寫「讓我們一起啟程吧／一起開始吧」這類口號；用更直接的資訊與可執行建議取代。
 4. **自然融入關鍵字**：主要關鍵字「${outline.keywords?.primary}」必須在引言中出現至少2次，以自然的方式融入句子中，避免堆砌或生硬插入。目標密度0.8%-1.2%。
@@ -471,7 +1389,7 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 
 **✅ 必須遵守：**
 1. 直接以 <p> 段落開始，不要任何 <h1>, <h2> 標題
-2. 使用標準HTML標籤：<p>, <strong>, <a>
+2. 使用標準HTML標籤：<p>, <strong>, <ul>, <ol>, <li>
 3. 所有標籤必須正確閉合
 4. 不要包含任何 Markdown 語法
 5. 不要輸出任何解釋文字，只輸出HTML代碼
@@ -488,7 +1406,8 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 "投資理財是很重要的事情。我們需要仔細規劃，並選擇合適的工具。這對未來很有幫助。"
 
 **✅ 必須這樣寫（具體專業內容）：**
-"根據金管會統計，2024年台灣有67%的民眾持有股票或基金。然而，許多新手因為不了解『資產配置』原則，將全部資金押注單一標的，導致市場波動時損失慘重。本文將介紹3個實用策略，幫助你在30天內建立穩健的投資組合。"
+**✅ 必須這樣寫（具體、可執行、非模板）：**
+"如果你正在找『新手投資理財入門』的做法，最容易卡關的通常不是工具太少，而是不知道先後順序：先把緊急預備金與負債整理好，再決定用定期定額或一次性投入。下面我會先給你一個可照做的決策流程，並列出新手最常踩的 5 個雷，讓你不用靠猜。"
 
 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容。`;
 
@@ -511,6 +1430,33 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
       );
     }
 
+    // P0 (travel): remove template openings + opening questions deterministically, via rewrite.
+    if (contentDomain === 'travel') {
+      const introText = this.stripHtml(processedHtml);
+      const templateOpeningRe = /(在(?:這篇|本篇)文章中|在這篇《|在本文中|本文將|這篇文章將|本篇文章將|在文章中|文章整理了|將介紹)/;
+      const terminatorIdxCandidates = [
+        introText.indexOf('。'),
+        introText.indexOf('！'),
+        introText.indexOf('？'),
+        introText.indexOf('?'),
+        introText.indexOf('\n')
+      ].filter((i) => i >= 0);
+      const firstTerminatorIdx = terminatorIdxCandidates.length ? Math.min(...terminatorIdxCandidates) : Math.min(introText.length, 160);
+      const openingSpan = String(introText || '').slice(0, Math.min(introText.length, firstTerminatorIdx + 1));
+      const hasOpeningQuestion = /[？?]/.test(openingSpan);
+      const hasDuplicateBridge = /(接下來)[，,]\s*\1/.test(introText);
+
+      if (templateOpeningRe.test(introText) || hasOpeningQuestion || hasDuplicateBridge) {
+        processedHtml = await this.rewriteHtmlStrict(
+          processedHtml,
+          outline,
+          options,
+          '移除模板式開場（例如「在本篇文章中/本文將…」）、開場問句與重複銜接詞（如「接下來，接下來」）；第一句直接交付行程快覽'
+        );
+        processedHtml = this.stripLinksAndUrls(processedHtml);
+      }
+    }
+
     return {
       html: processedHtml,
       plain_text: this.stripHtml(processedHtml),
@@ -522,7 +1468,7 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
    * 生成單一段落
    */
   static async generateSection(section, outline, options = {}) {
-    const { provider, style_guide, serp_data, internal_links, verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, expected_outline, personal_experience } = options;
+    const { provider, style_guide, serp_data, internal_links, contentDomain = 'general', verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, expected_outline, personal_experience, travelItinerary, brief, briefBlock } = options;
 
     // 🔧 兼容性處理：支援 title 或 heading
     const sectionHeading = section.heading || section.title || '未命名段落';
@@ -549,9 +1495,34 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
     const topKeywords = serp_data?.contentPatterns?.topSnippetKeywords?.slice(0, 10).map(k => k.word).join('、') || '';
 
     // 內部連結建議
-    const internalLinksText = internal_links?.slice(0, 3).map(link => `- ${link.anchor_text} -> ${link.url}`).join('\n') || '';
+    // 內部連結建議（注意：全站禁止輸出 URL / <a>，僅能提及錨文字本身）
+    const internalLinksText = internal_links?.slice(0, 3).map(link => `- ${link.anchor_text}`).join('\n') || '';
+
+    const travelSectionDeliverable = contentDomain === 'travel' ? `
+  ## 🧳 旅遊段落寫法（避免模板文，務必可落地）
+  1. 每個小節至少提供 3 個「可以照做」的細節：時間/路線/區域選擇/票券決策/避雷。
+  2. 至少提供 1 個備案（例如：雨天/人潮爆炸/體力不足時怎麼改）。
+  3. 避免抽象形容詞（例如「很方便」「很值得」），要說清楚「為什麼」與「怎麼做」。
+  4. **一致性硬規則**：若本段落要提到「第X天/DayX」或把景點分配到某一天，必須與「行程快覽」一致；不確定就不要寫第幾天。
+  ` : '';
+
+    const travelItineraryBlock = contentDomain === 'travel' && String(travelItinerary || '').trim()
+      ? `\n## ✅ 行程快覽（請以此為準，不得矛盾）\n${String(travelItinerary).trim()}\n`
+      : '';
+
+    const normalizedBriefBlock = briefBlock || formatContentBriefForPrompt(brief);
+    const deliverablesReminder = Array.isArray(brief?.deliverables?.mustInclude) && brief.deliverables.mustInclude.length
+      ? `\n## ✅ 必交付（全文至少要交付一次）\n- ${brief.deliverables.mustInclude.map((v) => String(v)).join('\n- ')}\n`
+      : '';
+
+    const promise = this.extractCountPromiseFromHeading(sectionHeading);
+    const promiseGuard = this.buildPromiseGuardForPrompt(sectionHeading, promise);
 
     const prompt = `你是一位擁有 10 年以上經驗的領域專家與 SEO 內容寫手${author_bio ? `，你的身分是：${author_bio}` : ''}。請根據以下要求，撰寫文章的段落內容。
+
+  ${normalizedBriefBlock}
+  ${deliverablesReminder}
+  ${promiseGuard}
 
 ## 段落標題（H2）
 ${sectionHeading}
@@ -598,6 +1569,8 @@ ${formattedSources}
 ## 🔗 內部連結建議（如有）
 ${internalLinksText || '無可用內部連結'}
 
+${travelItineraryBlock}
+
 ## 👤 作者 Persona 與價值觀 (重要！)
 ${author_bio ? `- 作者背景: ${author_bio}` : ''}
 ${author_values ? `- 核心價值觀: ${author_values}` : ''}
@@ -609,13 +1582,15 @@ ${expected_outline ? `## 期望涵蓋的大綱/重點（需呼應）
 ${expected_outline}
 ` : ''}
 
+${travelSectionDeliverable}
+
 ## ✍️ 寫作風格約束（避免 AI 常見問題）
 1. **可讀性優先**：
    - 每段 3-4 句話，每句 15-25 字。
    - 避免長複句，讓國中生也能輕鬆理解。
-   - 多用「你可以」「建議」「步驟」等行動導向詞。
+  - 多用「你可以」「建議」「直接做法」等行動導向詞，避免空泛的「以下步驟」。
 2. **禁用 AI 慣用詞**：避免「深入探討」「全面解析」「不容忽視」「至關重要」「值得注意的是」等填充詞。
-3. **具體化**：用數據、案例、步驟、比喻取代抽象描述。例如：「風險很高」→「損失可能超過本金 30%」。
+3. **具體化**：用數據、案例、操作細節、比喻取代抽象描述。例如：「風險很高」→「損失可能超過本金 30%」。
 4. **口吻自然**：像對朋友說話，不要像教科書或官方文件。
 
 ## 寫作要求
@@ -633,17 +1608,17 @@ ${expected_outline}
 
 3. **拒絕空話 (No Fluff)**：
    - ❌ 禁止：「選擇適合的工具很重要」、「這需要仔細考量」等廢話。
-   - ✅ 必須：「建議使用 Firstrade 或 Schwab，因為...」、「手續費通常為 0 元，但需注意...」。
-   - 請提供**具體的名稱、數字、步驟、比較**。
+  - ✅ 必須：「建議使用 Firstrade 或 Schwab，因為...」、「手續費通常為 0 元，但需注意...」。
+  - 請提供**具體的名稱、數字、操作動作、比較**。
 
 3. **專家視角與實戰建議**：
    - 以專家的口吻撰寫，提供"見解"（Insight）而非僅是資訊堆疊。
    - 在解釋概念時，提供實際操作的建議或注意事項（「在實務上，建議...」）。
 
-3. **自然融入關鍵字**：主要關鍵字「${outline.keywords?.primary}」在本段落中至少出現2次，以自然方式融入句子，避免堆砌或生硬插入。目標密度0.8%-1.2%。
+3. **自然融入關鍵字**：主要關鍵字「${outline.keywords?.primary}」在本段落中自然融入即可（可不出現），避免為了出現而硬塞。SEO 會在全篇層級處理。
 
 4. **結構化輸出**：
-   - 善用列表 (<ul>, <ol>) 來整理步驟或要點。
+  - 若 brief 要求 steps/checklist 才用 <ol>/<ul> 交付；一般情況用要點清單或小標，避免「第1步/Step 1」模板。
    - 若涉及比較，請嘗試用文字清楚描述差異（如：A券商適合X，B券商適合Y）。
 
 5. 每個子標題（H3）需有 150-200 字的內容（較長內容利於SEO排名）
@@ -703,9 +1678,8 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
   - 區分理論與實踐：「理論上是這樣，但實際操作中常遇到...」
 
 ### 🔗 內部連結要求
-- 如果有提供內部連結建議，必須自然融入至少 1 個
-- 使用格式：<a href="URL">錨文本</a>
-- 錨文本需自然融入文章，不強行插入
+- **禁止**輸出任何 URL 或 <a> 連結（外部/內部都不行）。
+- 如果有提供內部連結建議，只能自然提到「錨文本」本身，不要放連結。
 
 ## 📋 HTML 輸出格式規範（嚴格遵守）
 
@@ -741,28 +1715,28 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 
 **✅ 必須這樣寫（具體專業內容）：**
 \`\`\`html
-<h3>3步驟快速入門</h3>
-<p>根據調查，83%的新手在第一個月會犯「過度操作」的錯誤。建議採用以下方法：</p>
+<h3>ETF 定期定額：金額與節奏怎麼定</h3>
+<p>新手最常卡在「要放多少錢、多久扣一次」。下面的設定可以直接照做，不用猜：</p>
 <ul>
-  <li><strong>步驟1：</strong>每週只操作1次，避免頻繁進出</li>
-  <li><strong>步驟2：</strong>使用Firstrade或Schwab等零手續費券商</li>
-  <li><strong>步驟3：</strong>設定停損點在-7%，嚴格執行</li>
+  <li><strong>金額：</strong>先抓月收入 10% 當試運作額度（例如收入 6 萬就先扣 6 千），3 個月後再依波動調整。</li>
+  <li><strong>下單節奏：</strong>選每月固定同一天扣款，避開臨時加碼；把「臨時想加碼」改成每季一次的檢查日。</li>
+  <li><strong>風險控制：</strong>若 3 個月內最大回撤超過 8%，先把扣款金額減半並檢查持有標的是否過度集中。</li>
 </ul>
-<p>實際案例：工程師小王採用此方法後，3個月內將虧損從-15%縮減至-2%。</p>
+<p>這樣的做法把「金額、頻率、風險上限」都先定義好，讀者可以直接套用，再依自身波動耐受度微調。</p>
 \`\`\`
-**優點：**有數據(83%)、有具體名稱(Firstrade)、有步驟、有案例
+**優點：**直接給可落地的設定，沒有模板式「第1步/第2步」橋段，也沒有硬塞統計或虛構案例
 
 ## 🎯 內容質量標準（通用要求）
 
 **每個段落必須包含：**
 1. **具體細節**（至少2個）：
-   - 數字/百分比（「67%的人...」）
+  - 數字/區間（例如：「每週 1 次」、「3-6 個月」）
    - 專有名詞（「Firstrade券商」、「斜方肌」）
    - 時間/數量（「3個月內」、「每週2次」）
    
 2. **可執行建議**（至少1個）：
-   - 明確步驟（「步驟1：...」）
-   - 具體建議（「建議使用...」）
+  - 行動指令（「先設月扣款上限…」、「遇到X時改Y」）
+  - 具體建議（「建議使用...」）
    - 注意事項（「避免...」、「記住...」）
 
 3. **每個H3至少200字**：
@@ -772,7 +1746,9 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 **禁止使用空泛詞彙：**
 ❌ 深入探討、全面解析、值得注意、至關重要、相當關鍵
 ❌ 這很重要、需要仔細考量、不容忽視
-✅ 改用具體描述：「損失可能超過30%」、「建議每週操作1次」
+✅ 改用具體描述：「投入比例超過你能承受的波動」、「建議每週固定 1 次檢視」
+
+（提醒：避免捏造具體百分比或虛構案例；如果沒有可信來源，就用定性描述或給出可驗證的操作規則。）
 
 直接輸出 HTML，不要有任何解釋文字。
 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容。`;
@@ -830,6 +1806,9 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
       );
     }
 
+    // Promise enforcement: ensure promised counts (e.g., 3大陷阱) are actually delivered.
+    cleanedHtml = await this.appendMissingPromisedItemsIfNeeded(sectionHeading, cleanedHtml, outline, options);
+
     // 🆕 最终质量验证
     const finalContent = {
       heading: sectionHeading,
@@ -862,6 +1841,10 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
   static async refineSection(draftHtml, section, outline, options) {
     const { provider, style_guide, author_bio, author_values } = options;
     
+    const sectionHeading = section?.heading || section?.title || '';
+    const promise = this.extractCountPromiseFromHeading(sectionHeading);
+    const promiseGuard = this.buildPromiseGuardForPrompt(sectionHeading, promise);
+
     const prompt = `你是一位極度嚴格的資深主編 (Editor-in-Chief)。請審核並重寫以下文章段落（初稿）。
 
 ## 你的任務
@@ -884,6 +1867,8 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 6. **語氣潤飾**：${style_guide?.tone || '專業、權威且易讀'}，口吻自然像對朋友說話。
 7. **稱呼一致**：全篇一律使用「你／你的」，不要使用「您／您的」。
 8. **刪除口號句**：如果出現「讓我們一起」「一起開始/啟程」等句子，請刪掉並用實用建議取代。
+
+${promiseGuard ? `## ✅ 承諾交付檢查（必做）\n${promiseGuard}` : ''}
 
 ## 👤 作者 Persona 與價值觀一致性檢查 (重要！)
 ${author_bio ? `- 作者背景: ${author_bio}` : ''}
@@ -960,11 +1945,45 @@ ${draftHtml}
    * 生成 FAQ 區塊（作為一個額外的段落，段內使用 H3 Q/A）
    */
   static async generateFaqSection(questions, outline, options = {}) {
-    const { provider, style_guide, target_audience, author_bio, author_values } = options;
+    const { provider, style_guide, target_audience, author_bio, author_values, contentDomain = 'general', travelItinerary, brief, briefBlock } = options;
 
-    const qList = questions.map((q, idx) => `${idx + 1}. ${q}`).join('\n');
+    const normalizedQuestions = contentDomain === 'travel'
+      ? questions.map((q) => this.normalizeTravelFaqQuestion(q, outline)).filter(Boolean)
+      : questions;
+
+    const qList = normalizedQuestions.map((q, idx) => `${idx + 1}. ${q}`).join('\n');
+
+    const kwPrimary = String(outline.keywords?.primary || '').trim();
+    const faqTopic = contentDomain === 'travel'
+      ? (this.extractTravelTopicFromKeyword(kwPrimary || outline.title || '') || '東京')
+      : (this.extractFaqTopicFromKeyword(kwPrimary || outline.title || '') || kwPrimary || outline.title || '');
+
+    const faqTitleGuard = `
+## ✅ FAQ 標題自然化（重要）
+- **請用自然的問題標題**，不要每一題都硬塞「${kwPrimary}」當主詞開頭。
+- 允許用更短的主題詞（例如「${faqTopic}」），也允許省略主題詞（因為本文主題已經交代）。
+- 範例：不要寫「${kwPrimary} 新手該如何開始？」；可以寫「新手該從哪一步開始？」或「${faqTopic} 新手該從哪一步開始？」。
+`;
+
+    const travelFaqGuard = contentDomain === 'travel' ? `
+
+  ## 🧳 旅遊 FAQ 一致性硬規則（重要）
+  1. **FAQ 內容不得發明新的「第X天/DayX 行程範例」**（這很容易與行程快覽矛盾）。
+     - 若需要舉例，只能用「把相近景點放同一天」這種不帶 Day 編號的例子。
+  2. 若你真的必須提到 Day1～Day5（不建議），只能認列下方行程快覽；不得新增或改動每日景點。
+  ${String(travelItinerary || '').trim() ? `
+  ## ✅ 行程快覽（供你對照，不得矛盾）
+  ${String(travelItinerary).trim()}
+  ` : ''}
+
+  ${faqTitleGuard}
+  ` : '';
+
+    const normalizedBriefBlock = briefBlock || formatContentBriefForPrompt(brief);
 
     const prompt = `你是一位專業的 SEO 內容寫手。請撰寫文章的 FAQ 段落，專門回答新手最常問的問題。
+
+  ${normalizedBriefBlock}
 
 ## 主題
 ${outline.title}
@@ -977,6 +1996,10 @@ ${target_audience || '一般讀者'}
 
 ## FAQ 題目（必須逐題回答）
 ${qList}
+
+${faqTitleGuard}
+
+${travelFaqGuard}
 
 ## 寫作要求
 1. 請直接輸出 HTML（使用多個 <h3> 作為問題標題，每題至少 2 段 <p> 回答）。
@@ -1001,6 +2024,12 @@ ${author_values ? `- 核心價值觀: ${author_values}` : ''}
     let cleanedHtml = this.cleanMarkdownArtifacts(result.content || '').trim();
     cleanedHtml = this.stripLinksAndUrls(cleanedHtml);
 
+    cleanedHtml = this.normalizeFaqHeadingsHtml(cleanedHtml, outline, contentDomain);
+
+    if (contentDomain === 'travel') {
+      cleanedHtml = this.normalizeTravelFaqHeadingsHtml(cleanedHtml, outline);
+    }
+
     return {
       heading: '常見問題（FAQ）',
       html: cleanedHtml,
@@ -1012,11 +2041,31 @@ ${author_values ? `- 核心價值觀: ${author_values}` : ''}
    * 生成結論段落
    */
   static async generateConclusion(outline, sections, options = {}) {
-    const { provider, style_guide, verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, personal_experience } = options;
+    const { provider, style_guide, contentDomain = 'general', verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, personal_experience, travelItinerary, brief, briefBlock } = options;
 
     const mainPoints = sections.map(s => s.heading).join('\n- ');
 
+    const travelConclusionGuidance = contentDomain === 'travel' ? `
+## 🧳 旅遊結語要求（避免跨域殘留）
+- 禁止出現理財/投資語彙或行動（例如「收支盤點、投資、資產配置、報酬」）。
+- CTA 要回到旅遊可執行：例如「把 Day1～Day5 快覽貼到行事曆、把住宿區域定案、先選交通票券」。
+  - 若要提到第幾天/DayX，必須與行程快覽一致。
+  ${String(travelItinerary || '').trim() ? `\n## ✅ 行程快覽（供你對照，不得矛盾）\n${String(travelItinerary).trim()}\n` : ''}
+` : '';
+
+    const ctaExample = contentDomain === 'travel'
+      ? '例如「今天先把 Day1～Day5 快覽貼進行事曆，並把住宿區域/交通票券先定下來」'
+      : '例如「今天先挑 1 個最小可行的下一步開始做」';
+
+    const normalizedBriefBlock = briefBlock || formatContentBriefForPrompt(brief);
+    const mustInclude = Array.isArray(brief?.deliverables?.mustInclude) ? brief.deliverables.mustInclude : [];
+    const checklistRequirement = mustInclude.some((v) => String(v || '').trim().toLowerCase() === 'checklist')
+      ? '\n8. 若 Brief 要求「checklist」，請在結尾附上一段「重點檢查清單」並用 <ul> 列出 5-8 個可勾選要點。'
+      : '';
+
     const prompt = `你是一位專業的 SEO 內容寫手。請根據以下資訊，撰寫文章的結論部分。
+
+  ${normalizedBriefBlock}
 
 ## 文章標題
 ${outline.title}
@@ -1037,14 +2086,17 @@ ${personal_experience ? `- 可引用的真實經驗/案例: ${personal_experienc
 ## 目標受眾
 ${target_audience || '一般讀者'}
 
+${travelConclusionGuidance}
+
 ## 寫作要求
 1. 總結文章的核心要點
 2. 強調讀者的收穫與價值
-3. 包含明確的行動呼籲（Call to Action），但要務實（例如「今天先完成收支盤點」）；**不要**出現推銷式語句（如「立即下載免費表格」）。
+3. 包含明確的行動呼籲（Call to Action），但要務實（${ctaExample}）；**不要**出現推銷式語句（如「立即下載免費表格」）。
 4. **自然融入關鍵字**：主要關鍵字至少自然出現 1-2 次，避免堆砌。
 5. 若前文已引用來源，結論可重申 1 個關鍵來源以強化可信度（不要新造來源）。
 6. 字數控制在 150-200 字
 7. 語氣：${style_guide?.tone || '專業但易懂'}
+${checklistRequirement}
 ${style_guide ? `8. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 
 ## **E-E-A-T 引用規範（Citation Protocol）**：
@@ -1095,6 +2147,28 @@ ${style_guide ? `8. 品牌風格：${JSON.stringify(style_guide)}` : ''}
     const LibrarianService = require('./librarianService');
     const verifiedSources = passedSources || await LibrarianService.getVerifiedSources(outline.title || outline.keywords?.primary);
     cleanedHtml = LibrarianService.injectCitations(cleanedHtml, verifiedSources);
+
+    // Enforce no URL/links in conclusion output (defensive; also covered by quality rules).
+    cleanedHtml = this.stripLinksAndUrls(cleanedHtml);
+
+    // Travel-specific conclusion cleanup: avoid rhetorical questions + template-y closers.
+    if (contentDomain === 'travel') {
+      const conclusionText = this.stripHtml(cleanedHtml);
+      const hasAnyQuestion = /[？?]/.test(conclusionText);
+      const hasDuplicateBridge = /(接下來)[，,]\s*\1/.test(conclusionText);
+      const templateClosingRe = /(準備好.*了嗎|接下來享受|讓我們一起)/;
+      const genericDayStartRe = /(從[^。！？\n]{0,40}第\s*[一二三四五六七八九十\d]{1,3}\s*天開始|第\s*[一二三四五六七八九十\d]{1,3}\s*天開始)/;
+
+      if (hasAnyQuestion || hasDuplicateBridge || templateClosingRe.test(conclusionText) || genericDayStartRe.test(conclusionText)) {
+        cleanedHtml = await this.rewriteHtmlStrict(
+          cleanedHtml,
+          outline,
+          options,
+          '旅遊結語請避免問句式 CTA、模板化收尾（例如「準備好…了嗎」「接下來享受…」）以及「從第一天開始…」這種容易造成行程矛盾的泛用說法；改成務實的下一步清單'
+        );
+        cleanedHtml = this.stripLinksAndUrls(cleanedHtml);
+      }
+    }
     
     return {
       html: cleanedHtml,
@@ -1278,45 +2352,57 @@ ${userInput}
   /**
    * 🆕 生成領域感知的免責聲明
    */
-  static generateDomainAwareDisclaimer(domain) {
+  static generateDomainAwareDisclaimer(domain, usedSources = []) {
     const disclaimers = {
       health: {
         title: '醫療免責聲明',
-        content: '本文提供的資訊僅供參考，不能替代專業醫療建議、診斷或治療。如有任何健康疑慮，請務必諮詢合格的醫療專業人員。'
+        content: '以下資訊僅供參考，不能替代專業醫療建議、診斷或治療。如有任何健康疑慮，請務必諮詢合格的醫療專業人員。'
       },
       finance: {
         title: '投資免責聲明',
-        content: '本文提供的資訊僅供參考，不構成任何投資建議。投資有風險，過去績效不代表未來表現。在進行任何投資決策前，請諮詢合格的財務顧問。'
+        content: '以下資訊僅供參考，不構成任何投資建議。投資有風險，過去績效不代表未來表現。在進行任何投資決策前，請諮詢合格的財務顧問。'
       },
       tech: {
         title: '技術免責聲明',
-        content: '本文提供的技術資訊僅供參考，實際應用時可能因環境差異而有所不同。在實施任何技術方案前，建議諮詢專業技術顧問。'
+        content: '以下技術資訊僅供參考，實際應用時可能因環境差異而有所不同。在實施任何技術方案前，建議諮詢專業技術顧問。'
       },
       education: {
         title: '教育免責聲明',
-        content: '本文提供的教育與職涯資訊僅供參考，實際情況可能因個人條件與市場環境而異。建議在做出重大決定前，諮詢專業職涯顧問。'
+        content: '以下教育與職涯資訊僅供參考，實際情況可能因個人條件與市場環境而異。建議在做出重大決定前，諮詢專業職涯顧問。'
       },
       lifestyle: {
         title: '內容免責聲明',
-        content: '本文提供的生活資訊僅供參考，實際體驗可能因個人喜好與環境而異。文中提及的產品或服務不代表本站推薦或背書。'
+        content: '以下生活資訊僅供參考，實際體驗可能因個人喜好與環境而異。文中提及的產品或服務不代表本站推薦或背書。'
       },
       general: {
         title: '免責聲明',
-        content: '本文提供的資訊僅供參考，實際情況可能因個人條件與環境而異。在做出任何重大決定前，建議諮詢相關領域的專業人士。'
+        content: '以下資訊僅供參考，實際情況可能因個人條件與環境而異。在做出任何重大決定前，建議諮詢相關領域的專業人士。'
       }
     };
 
     const disclaimer = disclaimers[domain] || disclaimers.general;
     
-    // 🆕 使用動態來源服務生成參考來源文字（降級時使用通用說明）
-    let sourcesText = '相關領域的權威機構與專業組織';
-    try {
-      const fallbackSources = AuthoritySourceService.getFallbackSources(domain);
-      if (fallbackSources && fallbackSources.length > 0) {
-        sourcesText = fallbackSources.slice(0, 2).map(s => s.institutionName || s.title).join('、');
+    // Avoid over-claiming specific institutions unless they were actually verified/used.
+    const safeHostFromUrl = (url) => {
+      try {
+        const u = new URL(String(url));
+        return u.hostname;
+      } catch (e) {
+        return '';
       }
-    } catch (error) {
-      console.error('⚠️ 無法取得來源文字，使用通用說明');
+    };
+
+    let sourcesText = '多方公開資料';
+    if (Array.isArray(usedSources) && usedSources.length > 0) {
+      const hosts = [];
+      for (const s of usedSources) {
+        const host = safeHostFromUrl(s?.url);
+        if (host) hosts.push(host);
+      }
+      const uniqueHosts = Array.from(new Set(hosts)).slice(0, 3);
+      if (uniqueHosts.length) {
+        sourcesText = `多方公開資料（包含：${uniqueHosts.join('、')}）`;
+      }
     }
 
     return `
@@ -1324,7 +2410,7 @@ ${userInput}
       <div class="article-footer" style="background-color: #f9f9f9; padding: 20px; margin-top: 30px; border-radius: 8px;">
         <h4>關於作者</h4>
         <p><strong>ContentPilot 編輯團隊</strong></p>
-        <p>我們致力於提供經過深入研究、專家審核的專業內容。本文內容參考${sourcesText}等公開資料，旨在為讀者提供實用且可靠的資訊。</p>
+        <p>我們致力於提供經過整理與一致性檢查的內容。這裡的整理參考${sourcesText}，旨在為讀者提供實用且可靠的資訊。</p>
         
         <div class="disclaimer" style="font-size: 0.9em; color: #666; margin-top: 15px;">
           <strong>${disclaimer.title}：</strong>${disclaimer.content}
@@ -1395,7 +2481,7 @@ ${target_keyword}
    * 確保標題與 meta description 有安全預設值
    * - 取用優先順序：title -> keyword -> keywords.primary -> fallback
    */
-  static resolveTitleMeta(source = {}, fallbackKeyword = '') {
+  static resolveTitleMeta(source = {}, fallbackKeyword = '', contentDomain = 'general') {
     const titleCandidate = [
       source.title,
       source.keyword,
@@ -1410,26 +2496,91 @@ ${target_keyword}
       `${titleCandidate} - 完整指南`
     ].find(t => typeof t === 'string' && t.trim().length > 0) || `${titleCandidate} - 完整指南`;
 
+    const trimmedMeta = metaCandidate.trim();
+
     return {
       title: titleCandidate.trim(),
-      meta_description: metaCandidate.trim()
+      meta_description: this.sanitizeMetaDescription(trimmedMeta, {
+        contentDomain,
+        keyword: fallbackKeyword || source.keywords?.primary || source.keyword || ''
+      })
     };
+  }
+
+  /**
+   * 針對特定領域的 meta description 做最小必要的去模板化
+   */
+  static sanitizeMetaDescription(meta, { contentDomain = 'general', keyword = '' } = {}) {
+    if (typeof meta !== 'string') return meta;
+
+    let result = meta.trim();
+    result = this.scrubPlaceholders(result, keyword);
+
+    if (contentDomain === 'travel') {
+      // 1) 去掉強 CTA
+      result = result
+        .replace(/立即參考|立即查看|立即了解|立刻|馬上|現在就|快來/g, '可直接參考')
+        .replace(/下載(?:免費)?(?:行程表|行程規劃|表格|攻略|清單)/g, '可直接參考')
+        .replace(/(?:行程表|表格)下載/g, '可直接參考')
+        .replace(/下載/g, '')
+        .replace(/立即/g, '')
+        .replace(/[!！]+/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+
+      // 2) 進一步把收尾的導流式用語拿掉（保留描述本身）
+      result = result
+        .replace(/[,，]?\s*(?:開始規劃|開始計畫|開始安排行程)\s*$/u, '')
+        .replace(/[,，]?\s*(?:開始規劃|開始計畫|開始安排行程)[。.]?$/u, '')
+        .trim();
+
+      // 3) 避免變成空字串
+      if (result.length < 12) {
+        const safeKeyword = (keyword || '').trim();
+        result = safeKeyword
+          ? `整理 ${safeKeyword} 的行程快覽、交通與住宿重點，方便直接套用。`
+          : '整理行程快覽、交通與住宿重點，方便直接套用。';
+      }
+    }
+
+    return result;
+  }
+
+  static scrubPlaceholders(text, keyword = '') {
+    if (text === null || text === undefined) return text;
+    const safeKw = String(keyword || '').trim();
+    let out = String(text);
+    out = out.replace(/--keyword/gi, safeKw || '');
+    out = out.replace(/\{keyword\}/gi, safeKw || '');
+    out = out.replace(/--qualityGate/gi, '');
+    out = out.replace(/--brief/gi, '');
+    out = out.replace(/\s{2,}/g, ' ').trim();
+    return out;
   }
 
   /**
    * 確保目標關鍵字至少自然出現 2 次；若不足，於結論補充一句
    */
   static ensureKeywordPresence(article, keyword) {
-    if (!article || !keyword) return article;
+    const safeKeyword = String(keyword || '').trim();
+    if (!article || !safeKeyword) return article;
 
-    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // 全域移除佔位符（--keyword / {keyword} 等），避免殘留到輸出
+    try {
+      article = JSON.parse(this.scrubPlaceholders(JSON.stringify(article), safeKeyword));
+    } catch (e) {
+      // 若序列化失敗，略過不阻塞流程
+    }
+
+    const escaped = safeKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const pattern = new RegExp(escaped, 'g');
     const contentText = JSON.stringify(article);
     const count = (contentText.match(pattern) || []).length;
 
     if (count >= 2) return article;
 
-    const sentence = `<p>本指南聚焦「${keyword}」，提供台北出發、兩小時內的低碳親子旅行建議，方便家庭週末快速採用。</p>`;
+    // 只補一個中性句，避免跨領域的錯誤情境（例如台北出發/親子低碳）污染內容。
+    const sentence = `<p>本指南聚焦「${safeKeyword}」，整理可直接採用的重點與步驟，方便快速上手。</p>`;
 
     if (article.content?.conclusion) {
       article.content.conclusion.html = (article.content.conclusion.html || '') + sentence;
@@ -1482,13 +2633,14 @@ ${target_keyword}
         if (openTagCount > closeTagCount) {
           return;
         }
-        
+
         // 輪流使用權威來源
         const source = authoritySources[sourceIndex % authoritySources.length];
         sourceIndex++;
-        
-        const sourceLink = `<a href="${source.url}" target="_blank" rel="noopener">${source.institutionName || source.title}</a>`;
-        const replacement = `根據${sourceLink}的資料顯示`;
+
+        // Keep only institution/title text for traceability.
+        const sourceName = source.institutionName || source.title || '權威來源';
+        const replacement = `根據${sourceName}的資料顯示`;
         
         // 替換
         fixedHtml = fixedHtml.substring(0, index) + replacement + fixedHtml.substring(index + text.length);
@@ -1580,9 +2732,10 @@ ${target_keyword}
       // 策略1: 如果有可用的權威來源，替換為真實URL
       if (authoritySources.length > 0 && replaceCount < authoritySources.length) {
         const source = authoritySources[replaceCount % authoritySources.length];
-        const replacement = `<a href="${source.url}">${item.linkText || source.name}</a>`;
-        cleanedHtml = cleanedHtml.replace(item.fullMatch, replacement);
-        console.log(`  🔄 替換為真實來源: ${source.url}`);
+        // Keep only safe visible text; do not emit URLs or <a>.
+        const replacementText = item.linkText || source.institutionName || source.title || source.name || '權威來源';
+        cleanedHtml = cleanedHtml.replace(item.fullMatch, replacementText);
+        console.log(`  🔄 替換為真實來源（僅保留文字，不輸出URL）: ${source.url}`);
         replaceCount++;
       } else {
         // 策略2: 移除<a>標籤但保留文字
@@ -1591,6 +2744,9 @@ ${target_keyword}
         removeCount++;
       }
     }
+
+    // Final safety: strip any remaining <a> tags / raw URLs.
+    cleanedHtml = this.stripLinksAndUrls(cleanedHtml);
     
     console.log(`\n📋 [P5驗證結果]`);
     console.log(`  ✅ 有效URL: ${validUrls.length} 個`);

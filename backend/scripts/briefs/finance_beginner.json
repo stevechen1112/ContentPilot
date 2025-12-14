@@ -1,0 +1,34 @@
+{
+  "keyword": "新手投資理財入門",
+  "secondaryKeywords": ["資產配置", "ETF", "風險承受度", "緊急預備金"],
+  "purpose": "guide",
+  "desiredAction": "完成一份新手理財起步清單，先把風險與現金流安排好再挑工具",
+  "targetAudience": {
+    "level": "beginner",
+    "persona": "上班族",
+    "scenario": "剛開始有一筆可運用資金，想開始理財投資但怕踩雷、也怕被話術推銷。",
+    "taboos": ["恐嚇式用語", "推銷口吻", "保證獲利"]
+  },
+  "author": {
+    "identity": "務實派理財教練",
+    "values": ["風險優先", "可持續", "不追短線"],
+    "tone": "務實、不誇大收益、重視風險管理",
+    "bannedPhrases": ["在本文中", "讓我們一起", "全面解析", "不容忽視"]
+  },
+  "deliverables": {
+    "mustInclude": ["steps", "checklist"],
+    "optionalSections": ["common_mistakes", "faq"],
+    "targetH2Count": {"min": 5, "max": 7},
+    "depth": "standard"
+  },
+  "originality": {
+    "uniqueAngles": ["先定風險承受度再選工具", "先做不做清單，再做要做清單"],
+    "commonPitfalls": ["只看報酬不看風險", "一開始就追熱門題材"],
+    "allowedCaseNotes": "可用一般性情境舉例，但不要捏造不可證實的個人客戶案例"
+  },
+  "credibility": {
+    "requireSources": true,
+    "minSources": 2,
+    "allowedSourceTypes": ["regulator", "exchange", "government", "academic"]
+  }
+}

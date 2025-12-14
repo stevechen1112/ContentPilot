@@ -194,7 +194,10 @@ ${JSON.stringify(article, null, 2)}
   static async checkSEO(article, targetKeyword) {
     const htmlContent = this.extractHtmlContent(article);
     const textContent = this.extractTextContent(article);
-    const wordCount = textContent.length;
+    // SEO 統計採「空白不敏感」：避免 "失眠 怎麼改善" 因為空白而被判定密度 0。
+    const normalizedText = textContent.replace(/\s+/g, '');
+    const normalizedKeyword = String(targetKeyword || '').replace(/\s+/g, '');
+    const wordCount = normalizedText.length;
 
     console.log('--- SEO Check Debug ---');
     console.log('Target Keyword:', targetKeyword);
@@ -206,10 +209,13 @@ ${JSON.stringify(article, null, 2)}
     const issues = [];
     const suggestions = [];
 
-    // 關鍵字密度檢查
-    const keywordCount = (textContent.match(new RegExp(targetKeyword, 'gi')) || []).length;
-    // 修正：密度計算應考慮關鍵字長度 (Keyword Length * Count / Total Chars)
-    const keywordDensity = ((keywordCount * targetKeyword.length) / wordCount) * 100;
+    // 關鍵字密度檢查（需 escape + 空白不敏感）
+    const escapedKeyword = normalizedKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const keywordCount = escapedKeyword
+      ? (normalizedText.match(new RegExp(escapedKeyword, 'gi')) || []).length
+      : 0;
+    // 密度計算：KeywordLen * Count / TotalChars
+    const keywordDensity = wordCount > 0 ? ((keywordCount * normalizedKeyword.length) / wordCount) * 100 : 0;
 
     if (keywordDensity < 0.8) { // 提高標準至 0.8% (原 0.5%)
       score -= 10; // 降低扣分權重 (原 15)

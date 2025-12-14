@@ -5,6 +5,10 @@ const OutlineService = require('../services/outlineService');
 const ArticleService = require('../services/articleService');
 const QualityService = require('../services/qualityService');
 const ExperienceGapService = require('../services/experienceGapService');
+const {
+  normalizeContentBrief,
+  validateContentBriefRequiredFields
+} = require('../services/contentBrief');
 
 class ArticleController {
   /**
@@ -13,10 +17,68 @@ class ArticleController {
    */
   static async generateOutline(req, res) {
     try {
-      const { keyword, project_id, serp_data, tone, target_audience, author_bio, author_values, unique_angle, expected_outline, personal_experience } = req.body;
+      const {
+        keyword,
+        project_id,
+        serp_data,
+        tone,
+        target_audience,
+        author_bio,
+        author_values,
+        unique_angle,
+        expected_outline,
+        personal_experience,
+        brief,
+        provider,
+        brief_strict
+      } = req.body;
 
       if (!keyword) {
         return res.status(400).json({ error: 'Keyword is required' });
+      }
+
+      // Brief preflight validation (per backend/docs/CONTENT_CONFIG_SCHEMA.md)
+      // - If brief_strict=true: reject missing required fields.
+      // - Otherwise: accept but apply sensible defaults to reduce drift.
+      let effectiveBrief = brief;
+      if (brief && typeof brief === 'object') {
+        const normalizedNoDefaults = normalizeContentBrief(
+          {
+            brief,
+            keyword,
+            tone,
+            target_audience,
+            author_bio,
+            author_values,
+            unique_angle,
+            expected_outline,
+            personal_experience
+          },
+          { applyDefaults: false }
+        );
+
+        const missing = validateContentBriefRequiredFields(normalizedNoDefaults, { keyword });
+        if (missing.length && brief_strict === true) {
+          return res.status(400).json({
+            error: 'Brief missing required fields',
+            missing
+          });
+        }
+
+        effectiveBrief = normalizeContentBrief(
+          {
+            brief,
+            keyword,
+            tone,
+            target_audience,
+            author_bio,
+            author_values,
+            unique_angle,
+            expected_outline,
+            personal_experience
+          },
+          { applyDefaults: true }
+        );
       }
 
       // 如果有 project_id，驗證權限（POC 模式跳過）
@@ -32,7 +94,9 @@ class ArticleController {
         author_values,
         unique_angle,
         expected_outline,
-        personal_experience
+        personal_experience,
+        brief: effectiveBrief,
+        provider
       });
 
       res.json({
@@ -51,12 +115,72 @@ class ArticleController {
    */
   static async generateArticle(req, res) {
     try {
-      let { project_id, keyword_id, outline, serp_data, tone, target_audience, author_bio, author_values, unique_angle, expected_outline, personal_experience } = req.body;
+      let {
+        project_id,
+        keyword_id,
+        outline,
+        serp_data,
+        tone,
+        target_audience,
+        author_bio,
+        author_values,
+        unique_angle,
+        expected_outline,
+        personal_experience,
+        brief,
+        provider,
+        brief_strict,
+        enable_reader_evaluation
+      } = req.body;
 
       const skipDb = String(process.env.SKIP_DB || '').trim().toLowerCase() === 'true';
 
       if (!outline) {
         return res.status(400).json({ error: 'Outline is required' });
+      }
+
+      // Brief preflight validation (per backend/docs/CONTENT_CONFIG_SCHEMA.md)
+      let effectiveBrief = brief;
+      if (brief && typeof brief === 'object') {
+        const normalizedNoDefaults = normalizeContentBrief(
+          {
+            brief,
+            keyword: outline?.keywords?.primary || outline?.title,
+            tone,
+            target_audience,
+            author_bio,
+            author_values,
+            unique_angle,
+            expected_outline,
+            personal_experience
+          },
+          { applyDefaults: false }
+        );
+
+        const missing = validateContentBriefRequiredFields(normalizedNoDefaults, {
+          keyword: outline?.keywords?.primary || outline?.title
+        });
+        if (missing.length && brief_strict === true) {
+          return res.status(400).json({
+            error: 'Brief missing required fields',
+            missing
+          });
+        }
+
+        effectiveBrief = normalizeContentBrief(
+          {
+            brief,
+            keyword: outline?.keywords?.primary || outline?.title,
+            tone,
+            target_audience,
+            author_bio,
+            author_values,
+            unique_angle,
+            expected_outline,
+            personal_experience
+          },
+          { applyDefaults: true }
+        );
       }
 
       // POC/Local mode: allow generation without database persistence
@@ -69,7 +193,10 @@ class ArticleController {
           author_values,
           unique_angle,
           expected_outline,
-          personal_experience
+          personal_experience,
+          brief: effectiveBrief,
+          provider,
+          enable_reader_evaluation
         });
 
         const cleanArticle = JSON.parse(JSON.stringify(article).replace(/\\u0000/g, ''));
@@ -81,6 +208,7 @@ class ArticleController {
             project_id: project_id || 'local-preview',
             keyword_id: keyword_id || null,
             title: cleanArticle.title,
+            quality_report: cleanArticle.quality_report || null,
             content_draft: cleanArticle,
             content: cleanArticle
           }
@@ -126,7 +254,10 @@ class ArticleController {
         author_values,
         unique_angle,
         expected_outline,
-        personal_experience
+        personal_experience,
+        brief: effectiveBrief,
+        provider,
+        enable_reader_evaluation
       });
 
       // 清理 PostgreSQL 不支援的 null 字符 (\u0000)
@@ -162,6 +293,7 @@ class ArticleController {
         data: {
           article_id: savedArticle.id,
           ...savedArticle,
+          quality_report: safeContent?.quality_report || null,
           content_draft: safeContent,
           content: safeContent // Map content_draft to content for frontend
         }
@@ -178,7 +310,7 @@ class ArticleController {
    */
   static async generateSectionStream(req, res) {
     try {
-      const { section, outline } = req.body;
+      const { section, outline, provider } = req.body;
 
       if (!section || !outline) {
         return res.status(400).json({ error: 'Section and outline are required' });
@@ -194,7 +326,7 @@ class ArticleController {
       await ArticleService.generateSectionStream(
         section,
         outline,
-        { provider: 'gemini' },
+        { provider: provider || process.env.AI_PROVIDER || 'openai' },
         (chunk) => {
           fullContent += chunk;
           res.write(`data: ${JSON.stringify({ chunk, full: fullContent })}\n\n`);

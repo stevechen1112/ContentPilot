@@ -45,6 +45,18 @@ class AuthoritySourceService {
       return { valid: false, reason: '必須使用HTTPS協議' };
     }
 
+    // 檢查4.5: 阻擋非HTML文件（我們的抓取器只接受 text/html）
+    // 這類連結常是下載檔/二進制，容易混入不相干來源並造成 SEO/sources 扣分
+    const lowerPath = (parsedUrl.pathname || '').toLowerCase();
+    const blockedFileExtensions = [
+      '.xls', '.xlsx', '.csv', '.tsv',
+      '.zip', '.rar', '.7z',
+      '.exe', '.dmg', '.apk'
+    ];
+    if (blockedFileExtensions.some((ext) => lowerPath.endsWith(ext))) {
+      return { valid: false, reason: '非HTML文件連結（下載檔/二進制）' };
+    }
+
     // 檢查5: 域名黑名單（過濾已知內容農場與低質量網站）
     // 移除原本的白名單限制，改為開放策略，讓 AI 自行判斷內容價值
     const blockedDomains = [
@@ -68,6 +80,7 @@ class AuthoritySourceService {
     const blockedPathPatterns = [
       /\/filedownload\//i,     // 文件下載頁面（通常是PDF/書目）
       /\/download\//i,          // 下載頁面
+      /\/var\/file\//i,          // 檔案倉儲/下載路徑（常見於校園/機構的附件檔）
       /\/catalog\//i,           // 目錄頁
       /\/index\//i,             // 索引頁
       /\/list\//i,              // 列表頁
@@ -189,30 +202,49 @@ class AuthoritySourceService {
    * 完整版需要爬取頁面內容，這裡先用輕量級方法
    */
   static validateUrlRelevance(source, keyword) {
-    // 將關鍵字拆分為tokens
-    const keywordTokens = keyword.toLowerCase().split(/[\s,，、]+/);
-    
-    // 檢查URL和標題中是否包含關鍵字的任何token
-    const textToCheck = `${source.url} ${source.title || ''}`.toLowerCase();
-    
-    const matchedTokens = keywordTokens.filter(token => 
-      token.length > 1 && textToCheck.includes(token)
-    );
-    
-    const relevanceRatio = keywordTokens.length > 0 
-      ? matchedTokens.length / keywordTokens.length 
-      : 0;
-    
+    const keywordText = String(keyword || '').trim().toLowerCase();
+    const keywordTokens = keywordText.split(/[\s,，、]+/).filter(Boolean);
+
+    // 檢查URL、標題與摘要（摘要常包含地名/主題詞）
+    const textToCheck = `${source.url} ${source.title || ''} ${source.snippet || ''}`.toLowerCase();
+
+    // 旅遊類關鍵字通常包含「地名 + 行程/自由行/天數」
+    // 抽出核心地名/主題詞，若完全缺失，通常代表不相干（可硬拒）
+    const genericTerms = [
+      '自由行', '行程', '行程規劃', '行程安排', '攻略', '景點', '住宿', '交通', '機票', '飯店',
+      '天', '夜', 'day', 'd',
+      '完整', '新手', '必讀', '懶人包', '推薦'
+    ];
+    const cjkTokens = (keywordText.match(/[\u4e00-\u9fff]{2,8}/g) || [])
+      .map(t => t.trim())
+      .filter(t => t.length >= 2 && !genericTerms.some(g => t.includes(g)));
+    const coreTerm = cjkTokens.length ? cjkTokens[0] : '';
+
+    if (coreTerm && !textToCheck.includes(coreTerm)) {
+      return {
+        relevant: false,
+        hardReject: true,
+        relevanceRatio: '0%',
+        matchedTokens: 0,
+        totalTokens: keywordTokens.length,
+        reason: `缺少核心詞「${coreTerm}」` 
+      };
+    }
+
+    const matchedTokens = keywordTokens.filter((token) => token.length > 1 && textToCheck.includes(token));
+    const relevanceRatio = keywordTokens.length > 0 ? matchedTokens.length / keywordTokens.length : 0;
+
     // 至少匹配30%的關鍵字tokens才算相關
     const isRelevant = relevanceRatio >= 0.3;
-    
+
     return {
       relevant: isRelevant,
+      hardReject: false,
       relevanceRatio: (relevanceRatio * 100).toFixed(0) + '%',
       matchedTokens: matchedTokens.length,
       totalTokens: keywordTokens.length,
-      reason: isRelevant 
-        ? `匹配${matchedTokens.length}/${keywordTokens.length}個關鍵詞` 
+      reason: isRelevant
+        ? `匹配${matchedTokens.length}/${keywordTokens.length}個關鍵詞`
         : `僅匹配${matchedTokens.length}/${keywordTokens.length}個關鍵詞（需至少30%）`
     };
   }
@@ -225,19 +257,24 @@ class AuthoritySourceService {
     const snippet = (source.snippet || '').toLowerCase();
     
     // 標題黑名單：明顯的非實質內容標記
+    // 注意：中文 SEO 標題常會出現「必讀/必看/懶人包」，僅靠這些字眼會造成大量誤殺。
+    // 因此將其降級為 soft markers，需搭配更強的「清單/排行/推薦書」訊號才會拒絕。
     const blockedTitleKeywords = [
       '年度新書', '新書目錄', '書目', '圖書清單', '館藏',
       // 書單/清單/推薦文（常見低可信、非一手資料）
-      '書單', '推薦書', '推薦.*書', '必讀', '必看', '懶人包', '清單', '排行榜',
+      '書單', '推薦書', '推薦.*書', '清單', '排行榜',
       'top\\s*\\d+', '\\d+本',
       '第\\d+批', '批次', 'filedownload', 'download',
       '索引', '目錄', '清單列表', '資料庫',
       '搜尋結果', '查詢結果', '檢索',
       '404', 'not found', 'page not found',
       // 電商與促銷關鍵詞
-      '買一送一', '折起', '特價', '優惠', '團購', 
+      '買一送一', '折起', '特價', '優惠', '團購',
       '購物車', '加入會員', '立即購買', '售價', '價格'
     ];
+
+    const softTitleKeywords = ['必讀', '必看', '懶人包'];
+    const strongListMarkers = ['書單', '推薦書', '推薦.*書', '清單', '排行榜', 'top\\s*\\d+', '\\d+本'];
 
     const hasBlockedKeyword = blockedTitleKeywords.some(keyword => {
       const pattern = new RegExp(keyword, 'i');
@@ -251,11 +288,38 @@ class AuthoritySourceService {
       };
     }
 
-    // 檢查摘要是否過短（可能是無效頁面）
-    if (snippet.length < 20) {
-      return { 
-        valid: false, 
-        reason: '摘要過短，可能是無效頁面' 
+    const hasSoftKeyword = softTitleKeywords.some((kw) => new RegExp(kw, 'i').test(title));
+    if (hasSoftKeyword) {
+      const hasStrongListMarker = strongListMarkers.some((kw) => {
+        const pattern = new RegExp(kw, 'i');
+        return pattern.test(title) || pattern.test(snippet);
+      });
+      if (hasStrongListMarker) {
+        return {
+          valid: false,
+          reason: '標題偏向清單/推薦型內容（soft+strong markers）'
+        };
+      }
+    }
+
+    // 避免把學位論文/論文庫等非面向一般讀者的內容當作「引用來源」
+    // （對旅遊/生活類文章通常會嚴重降低可交付性與相關性）
+    const blockedAcademicMarkers = [
+      '學位論文', '論文', 'thesis', 'dissertation',
+      'institutional repository', 'etd'
+    ];
+    if (blockedAcademicMarkers.some((kw) => title.includes(kw) || snippet.includes(kw))) {
+      return {
+        valid: false,
+        reason: '學術論文/論文庫類來源（通常不適合作為一般內容引用）'
+      };
+    }
+
+    // 檢查摘要是否過短（SERP 有時不給 snippet；空 snippet 不應直接判死刑）
+    if (snippet.length > 0 && snippet.length < 20) {
+      return {
+        valid: false,
+        reason: '摘要過短，可能是無效頁面'
       };
     }
 
@@ -481,12 +545,14 @@ ${keyword}
       
       // P3: 內容相關性驗證（輕量級 - 基於URL和標題）
       const relevanceValidation = this.validateUrlRelevance(source, keyword);
+      if (relevanceValidation.hardReject) {
+        continue;
+      }
+
       if (!relevanceValidation.relevant) {
-        // console.log(`⚠️ [P3相關性] ${source.title?.substring(0, 40)}... - ${relevanceValidation.reason}`);
         // 不直接跳過，只降低評分
         source.relevancePenalty = -15; // 扣15分
       } else {
-        // console.log(`✅ [P3相關性] ${source.title?.substring(0, 40)}... - ${relevanceValidation.reason}`);
         source.relevancePenalty = 0;
       }
 
@@ -842,7 +908,7 @@ ${searchQuery.query}
       ]
     };
 
-    return fallbackMap[domainInfo.domain] || fallbackMap.general;
+    return fallbackMap[domainKey] || fallbackMap.general;
   }
 
   /**

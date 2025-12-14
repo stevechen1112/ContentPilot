@@ -79,7 +79,21 @@ class AIService {
    * 通用 AI 呼叫（支援 Gemini 和 OpenAI）
    */
   static async generate(prompt, options = {}) {
-    // 強制只走 OpenAI（避免意外觸發 Gemini）
+    const provider = String(options.provider || process.env.AI_PROVIDER || 'openai').toLowerCase();
+
+    if (provider === 'gemini') {
+      try {
+        return await this.callGemini(prompt, options);
+      } catch (error) {
+        // Best-effort fallback to OpenAI if configured.
+        if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'dummy-key-not-used') {
+          console.warn(`⚠️ Gemini 失敗，改用 OpenAI：${error.message}`);
+          return await this.callOpenAI(prompt, options);
+        }
+        throw error;
+      }
+    }
+
     return await this.callOpenAI(prompt, options);
   }
 

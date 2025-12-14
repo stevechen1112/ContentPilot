@@ -2,19 +2,26 @@ const SerperService = require('../services/serperService');
 const KeywordModel = require('../models/keywordModel');
 
 class ResearchController {
+  static clampInt(value, min, max, fallback) {
+    const n = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+  }
+
   /**
    * 分析單一關鍵字的 SERP
    * POST /api/research/analyze-keyword
    */
   static async analyzeKeyword(req, res) {
     try {
-      const { keyword } = req.body;
+      const { keyword, research_multiplier } = req.body;
 
       if (!keyword) {
         return res.status(400).json({ error: 'Keyword is required' });
       }
 
-      const analysis = await SerperService.analyzeKeyword(keyword);
+      const multiplier = ResearchController.clampInt(research_multiplier, 1, 4, 1);
+      const analysis = await SerperService.analyzeKeyword(keyword, { multiplier });
 
       res.json({
         message: 'Keyword analysis completed',
@@ -32,14 +39,15 @@ class ResearchController {
    */
   static async analyzeBatch(req, res) {
     try {
-      const { project_id, keywords } = req.body;
+      const { project_id, keywords, research_multiplier } = req.body;
 
       if (!project_id || !Array.isArray(keywords) || keywords.length === 0) {
         return res.status(400).json({ error: 'Project ID and keywords array are required' });
       }
 
       // 執行批量分析
-      const analyses = await SerperService.analyzeKeywordBatch(keywords);
+      const multiplier = ResearchController.clampInt(research_multiplier, 1, 4, 1);
+      const analyses = await SerperService.analyzeKeywordBatch(keywords, 1000, { multiplier });
 
       // 準備儲存到資料庫的資料
       const keywordsToSave = analyses

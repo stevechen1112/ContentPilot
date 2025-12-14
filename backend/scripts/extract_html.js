@@ -1,5 +1,7 @@
-const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
+const fs = require('fs');
 
 const filePath = path.join(__dirname, '../generated_articles/2025-12-11T11-10-44-100Z_上背痛原因.json');
 

@@ -1,4 +1,11 @@
 {
+  "scripts": {
+    "backend:dev": "npm --prefix backend run dev",
+    "backend:start": "npm --prefix backend start",
+    "generate": "node backend/scripts/generate_article.js",
+    "verify:intro": "node backend/scripts/verify_intro_rewrite.js",
+    "test": "node backend/scripts/verify_intro_rewrite.js"
+  },
   "dependencies": {
     "@headlessui/react": "^2.2.9"
   }

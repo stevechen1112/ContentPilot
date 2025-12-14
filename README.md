@@ -1,376 +1,102 @@
-# ContentPilot - SEO 自動化內容生產系統 (POC)
+# SEO ContentForge (ContentPilot)
 
-Google 風格的極簡文章生成工具 - 輸入關鍵字，自動生成完整 SEO 優化文章。
+> **AI 骨架 + 人類靈魂 = 滿分 SEO 內容**
+> 
+> 將人工 8 小時的 SEO 文章創作壓縮至 20 分鐘。AI 負責 85 分的基礎建設，人類專注於最後 15 分的真實經驗補充。
 
-## 🌐 線上 Demo
+## 📖 專案簡介
 
-**正式環境**: [http://172.238.31.80](http://172.238.31.80)
+**SEO ContentForge** (原名 ContentPilot) 是一個企業級的自動化內容生產系統。不同於一般的 AI 寫作工具，本系統導入了 **"Human-in-the-loop" (人類介入)** 的設計哲學。
 
-- **Demo 模式**：無需登入即可使用所有功能
-- **自動認證**：系統自動使用 demo-user 身份
-- **完整體驗**：包含文章生成、查看、管理等所有功能
+我們認為 AI 擅長整理通用資訊 (General Information)，但無法憑空產生真實體驗 (Authentic Experience)。因此，本系統設計了 **S8 智能二修工作台**，主動偵測文章中的「經驗缺口」，引導人類作者補充真實案例與觀點，最終由 AI 完美融合，產出符合 Google E-E-A-T 標準的高品質內容。
+
+## 🌟 核心價值與特色
+
+### 1. 嚴格的品質守門員 (Quality Gate)
+系統內建 **S6 品質檢核模組**，在文章生成前後進行多重把關：
+- **Schema 驗證**：確保 Brief 包含所有必要欄位 (TA、Tone、交付形式)。
+- **來源檢核**：強制要求特定領域 (如 Health/Finance) 的最低來源數量。
+- **安全性檢查**：自動偵測並注入必要的安全警語與行動框架。
+- **讀者模擬評測**：內建 LLM 模擬挑剔讀者，提供 100 分制量化評分與具體修改建議。
+
+### 2. 智能經驗缺口偵測 (Experience Gap Detection)
+系統能自動分析文章段落，識別出「缺乏真實體驗」的區域 (S8 模組)：
+- **紅燈區**：純理論描述，急需補充實作細節。
+- **黃燈區**：有提到概念，但缺乏數據或案例佐證。
+- **引導式寫作**：系統會生成具體的問題 (例如：「您在執行此步驟時遇過什麼困難？」)，引導作者快速輸入經驗。
+
+### 3. 智能融合重寫 (Smart Rewrite)
+作者只需輸入口語化的經驗描述，AI 會自動將其轉化為專業的段落，並完美融入原文結構中，保持文風一致。
+
+### 4. 完整專案管理 (S0)
+- 支援多專案/多網站管理。
+- 關鍵字庫與內容行事曆規劃。
+- 視覺化儀表板監控內容品質分數。
+
+## 🏗️ 系統架構 (S0-S8)
+
+本系統依據 [完整開發計畫](SEO%20自動化內容生產系統完整開發計.md) 實作，包含以下核心模組：
+
+- **S0 專案管理層**：React 前端專案管理介面。
+- **S1 內容策劃輸入**：圖形化 Brief 設定 (Persona, Tone, Unique Angle)。
+- **S2 智能資訊採集**：整合 Serper.dev 進行即時 SERP 分析。
+- **S4 內容大綱生成**：基於競爭者分析的結構化大綱。
+- **S5 AI 寫作引擎**：支援 Gemini/OpenAI/Claude 的多模型生成。
+- **S6 品質檢核**：Schema 驗證、來源計數、讀者評分。
+- **S8 智能二修工作台**：經驗缺口偵測與互動式修訂。
 
 ## 🚀 快速開始
 
 ### 前置需求
 - Node.js 18+
 - PostgreSQL (透過 Docker)
+- API Keys (Gemini/OpenAI, Serper.dev)
 
-### 本地開發安裝步驟
+### 安裝步驟
 
 1. **啟動資料庫**
    ```bash
    docker-compose up -d
    ```
 
-2. **初始化資料庫**
+2. **初始化資料庫 Schema**
    ```bash
-   # 連接到 PostgreSQL 容器
    docker exec -i contentpilot-postgres psql -U postgres -d contentpilot_dev < backend/src/models/schema.sql
    ```
 
-3. **配置環境變數**
-   ```bash
-   # 後端環境變數
-   cp backend/.env.example backend/.env
-   # 編輯 backend/.env，填入 API Keys
-   
-   # 前端環境變數
-   cp frontend/.env.example frontend/.env
-   # 設定 VITE_API_URL=http://localhost:3000/api
-   ```
+3. **環境變數設定**
+   - 複製 `backend/.env.example` 到 `backend/.env` 並填入 API Keys。
+   - 複製 `frontend/.env.example` 到 `frontend/.env`。
 
-4. **啟動後端**
+4. **啟動後端 (Backend)**
    ```bash
    cd backend
    npm install
    npm run dev
    ```
-   後端運行於 `http://localhost:3000`
+   服務運行於: `http://localhost:3000`
 
-5. **啟動前端**
+5. **啟動前端 (Frontend)**
    ```bash
    cd frontend
    npm install
    npm run dev
    ```
-   前端運行於 `http://localhost:5173`
+   介面運行於: `http://localhost:5173`
 
-6. **開始使用**
-   - 打開瀏覽器訪問 `http://localhost:5173`
-   - 輸入關鍵字（例如：日本旅遊、健康飲食）
-   - 點擊生成按鈕
-   - 等待 1-3 分鐘即可獲得完整文章
+## 📚 相關文件
 
-## ✨ 主要功能
+- [完整開發計畫](SEO%20自動化內容生產系統完整開發計.md)
+- [內容設定 Schema 規範](backend/docs/CONTENT_CONFIG_SCHEMA.md)
+- [讀者評估 Prompt 設計](backend/docs/CONTENT_EVALUATION_PROMPT.md)
+- [內容評量標準](backend/docs/CONTENT_EVALUATION_STANDARDS.md)
 
-### 🎯 Google 風格介面
-- 極簡搜尋框設計
-- 無需登入，直接使用
-- 一鍵生成完整文章
+## 🛠️ 技術棧
 
-### 📝 文章生成
-- **深度內容策劃**：支援設定作者人設、目標受眾、核心價值觀與獨特觀點
-- **自動大綱生成**：根據關鍵字與策劃設定，生成結構化大綱
-- **完整內容撰寫**：包含引言、多個章節、結論，並融入真實經驗案例
-- **SEO 優化**：自動整合權威來源引用與競爭對手分析
-- **生成時間**：約 1-3 分鐘
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Zustand
+- **Backend**: Node.js, Express, PostgreSQL, Redis
+- **AI Models**: Google Gemini Pro (Default), OpenAI GPT-4o, Claude 3.5 Sonnet
+- **Tools**: Docker, Cheerio, Puppeteer
 
-### 📄 文章管理
-- **全頁面顯示**：獨立的文章閱讀介面
-- **一鍵複製**：複製 HTML 格式內容
-- **匯出 PDF**：使用瀏覽器列印功能匯出
-
-## 🛠️ 技術架構
-
-- **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS
-- **Backend**: Node.js + Express
-- **AI Engine**: Google Gemini API (`gemini-2.0-flash-exp`)
-- **Database**: PostgreSQL
-- **搜尋整合**: Serper.dev API
-
-## 📁 專案結構
-
-```
-ContentPilot/
-├── frontend/          # React 前端應用
-│   ├── src/
-│   │   ├── pages/     # 頁面組件
-│   │   ├── components/# 共用組件
-│   │   ├── lib/       # API 客戶端
-│   │   └── stores/    # 狀態管理
-│   └── package.json
-├── backend/           # Node.js 後端 API
-│   ├── src/
-│   │   ├── controllers/
-│   │   ├── services/  # AI 服務層
-│   │   ├── routes/
-│   │   └── middleware/
-│   └── .env          # 環境變數配置
-├── docker-compose.yml # 資料庫容器配置
-└── README.md
-
-```
-
-## ⚙️ 環境變數配置
-
-後端環境變數位於 `backend/.env`：
-
-```env
-# AI Provider
-AI_PROVIDER=gemini
-GOOGLE_GEMINI_API_KEY=你的API金鑰
-GOOGLE_GEMINI_MODEL=gemini-2.0-flash-exp
-
-# 搜尋 API
-SERPER_API_KEY=你的API金鑰
-
-# 資料庫
-DATABASE_URL=postgresql://postgres:postgres@localhost:5433/contentpilot_dev
-```
-
-## 🎨 使用範例
-
-1. **輸入關鍵字**：日本旅遊
-2. **系統處理**：
-   - 分析關鍵字意圖
-   - 生成文章大綱（5-7 個章節）
-   - 撰寫完整內容（引言、章節、結論）
-   - 整合權威來源引用
-3. **獲得文章**：
-   - 標題：「掌握日本旅遊的 5 大策略」
-   - 完整內容：約 2000-3000 字
-   - 包含權威來源連結
-   - 符合 SEO 優化標準
-
-## 📊 效能指標
-
-- **大綱生成**：10-30 秒
-- **文章生成**：1-3 分鐘
-- **文章長度**：2000-3000 字
-- **章節數量**：5-7 個
-- **Gemini 全面驅動**：從大綱規劃、引言撰寫到內文生成，全程使用 Gemini 模型，確保邏輯連貫與語意通順。
-- **E-E-A-T 優化**：內建權威來源檢索 (Librarian Service)，確保引用資料的可信度。
-- **自動引用**：文章中會自動標註參考來源，提升 SEO 權重。
-
-### 4. 智能二修與經驗補強 (Smart Refinement)
-- **經驗缺口檢測 (Experience Gap Detection)**：AI 自動識別文章中缺乏「真實體驗」的段落。
-- **引導式補充**：系統提示使用者輸入個人經驗或案例。
-- **智能融合**：AI 將使用者的真實經驗無縫融入文章中，打造獨一無二的原創內容。
-
-## 🔄 工作流程 (S1-S8)
-
-1.  **S1 內容策劃**: 設定關鍵字、受眾與語氣。
-2.  **S2 深度搜尋**: 透過 Serper API 獲取 SERP 資料與競爭對手資訊。
-3.  **S3 策略分析**: 分析搜尋意圖與內容缺口。
-4.  **S4 大綱生成**: Gemini 規劃最佳化文章結構。
-5.  **S5 全文生成**: 
-    - **Librarian**: 預先檢索權威來源。
-    - **Writing**: Gemini 逐段撰寫，確保內容深度。
-6.  **S6 結構優化**: 強制 HTML 結構 (H2/H3) 輸出。
-7.  **S7 格式輸出**: 生成標準 HTML，包含 Meta Description 與引用連結。
-8.  **S8 經驗補強**: 檢測並引導補充真實經驗。
-
-## 🧪 測試與開發
-
-專案包含用於測試文章生成的 CLI 工具，位於 `backend/scripts/` 目錄下：
-
-### 文章生成測試
-此腳本可模擬完整生成流程（不依賴前端），並產出 JSON 與 HTML 檔案。
-
-```bash
-cd backend
-node scripts/generate_article.js
-```
-
-- **輸出位置**: `backend/generated_articles/`
-- **配置方式**: 直接編輯 `scripts/generate_article.js` 中的 `keyword` 與 `tone` 等變數。
-
-## 🚀 生產環境部署
-
-### 系統架構
-- **伺服器**: Linode Ubuntu (172.238.31.80)
-- **前端**: React + Vite (port 5173) - PM2 管理
-- **後端**: Node.js + Express (port 3000) - PM2 管理
-- **資料庫**: Docker Compose
-  - PostgreSQL (port 5433)
-  - MongoDB (port 27017)
-  - Redis (port 6379)
-- **Web 伺服器**: Nginx 反向代理
-
-### 部署步驟
-
-1. **安裝依賴**
-   ```bash
-   # 安裝 Node.js 20
-   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-   sudo apt-get install -y nodejs
-   
-   # 安裝 PM2
-   sudo npm install -g pm2
-   
-   # 安裝 Docker
-   curl -fsSL https://get.docker.com -o get-docker.sh
-   sudo sh get-docker.sh
-   ```
-
-2. **Clone 專案**
-   ```bash
-   cd /opt
-   git clone https://github.com/stevechen1112/ContentPilot.git
-   cd ContentPilot
-   ```
-
-3. **啟動資料庫**
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **初始化資料庫**
-   ```bash
-   docker exec -i contentpilot-postgres psql -U postgres -d contentpilot_dev < backend/src/models/schema.sql
-   ```
-
-5. **配置環境變數**
-   ```bash
-   # 後端 .env
-   cd /opt/ContentPilot/backend
-   nano .env
-   ```
-   
-   設定內容：
-   ```env
-   PORT=3000
-   NODE_ENV=production
-   
-   # AI Provider
-   AI_PROVIDER=gemini
-   GOOGLE_GEMINI_API_KEY=你的金鑰
-   GOOGLE_GEMINI_MODEL=gemini-2.0-flash-exp
-   
-   # Database
-   DATABASE_URL=postgresql://postgres:postgres@localhost:5433/contentpilot_dev
-   POSTGRES_HOST=localhost
-   POSTGRES_PORT=5433
-   POSTGRES_DB=contentpilot_dev
-   POSTGRES_USER=postgres
-   POSTGRES_PASSWORD=postgres
-   
-   # APIs
-   SERPER_API_KEY=你的金鑰
-   ```
-   
-   前端 .env：
-   ```bash
-   cd /opt/ContentPilot/frontend
-   nano .env
-   ```
-   
-   設定內容：
-   ```env
-   VITE_API_URL=http://172.238.31.80/api
-   ```
-
-6. **啟動後端 (PM2)**
-   ```bash
-   cd /opt/ContentPilot/backend
-   npm install --production
-   pm2 start npm --name "contentpilot-backend" -- run start
-   ```
-
-7. **啟動前端 (PM2)**
-   ```bash
-   cd /opt/ContentPilot/frontend
-   npm install
-   pm2 start npm --name "contentpilot-frontend" -- run dev -- --host
-   ```
-
-8. **配置 Nginx**
-   ```bash
-   sudo nano /etc/nginx/sites-available/contentpilot
-   ```
-   
-   配置內容：
-   ```nginx
-   server {
-       listen 80;
-       server_name 172.238.31.80;
-
-       # 前端
-       location / {
-           proxy_pass http://127.0.0.1:5173;
-           proxy_http_version 1.1;
-           proxy_set_header Upgrade $http_upgrade;
-           proxy_set_header Connection 'upgrade';
-           proxy_set_header Host $host;
-           proxy_cache_bypass $http_upgrade;
-       }
-
-       # 後端 API (延長 timeout 以支援 AI 生成)
-       location /api/ {
-           proxy_pass http://127.0.0.1:3000;
-           proxy_http_version 1.1;
-           proxy_set_header Host $host;
-           proxy_set_header X-Real-IP $remote_addr;
-           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-           proxy_read_timeout 600s;
-           proxy_connect_timeout 600s;
-           proxy_send_timeout 600s;
-       }
-   }
-   ```
-   
-   啟用配置：
-   ```bash
-   sudo ln -s /etc/nginx/sites-available/contentpilot /etc/nginx/sites-enabled/
-   sudo nginx -t
-   sudo systemctl restart nginx
-   ```
-
-9. **設定 PM2 開機啟動**
-   ```bash
-   pm2 save
-   pm2 startup
-   ```
-
-### PM2 管理指令
-
-```bash
-# 查看狀態
-pm2 status
-
-# 查看日誌
-pm2 logs contentpilot-backend
-pm2 logs contentpilot-frontend
-
-# 重啟服務
-pm2 restart contentpilot-backend
-pm2 restart contentpilot-frontend
-
-# 停止服務
-pm2 stop contentpilot-backend
-pm2 stop contentpilot-frontend
-```
-
-### Demo 模式說明
-
-目前系統運行在 **Demo 模式**，特點如下：
-
-- **無需登入**：所有 API 請求自動使用 `demo-user` 身份
-- **無權限檢查**：所有使用者可存取所有專案和文章
-- **快速體驗**：適合展示和測試系統功能
-
-認證中介層 (`backend/src/middleware/auth.js`) 已配置為自動返回 demo 使用者：
-```javascript
-// 所有請求自動認證為 demo-user
-req.user = {
-  id: 'demo-user',
-  email: 'admin@example.com'
-};
-```
-
-**轉換為正式環境**：若需啟用完整的使用者註冊/登入系統，需重新實作 JWT 驗證邏輯。
-
-## 📄 授權
-
-MIT License
+---
+© 2025 SEO ContentForge Team. All Rights Reserved.

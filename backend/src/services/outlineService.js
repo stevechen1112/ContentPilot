@@ -1,8 +1,104 @@
 const AIService = require('./aiService');
 const SerperService = require('./serperService');
 const CompetitorAnalysisService = require('./competitorAnalysisService');
+const { normalizeContentBrief, formatContentBriefForPrompt } = require('./contentBrief');
 
 class OutlineService {
+  static parseCountTokenToNumber(token) {
+    const raw = String(token || '').trim();
+    if (!raw) return 0;
+    if (/^\d+$/.test(raw)) {
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    const map = {
+      '零': 0,
+      '一': 1,
+      '二': 2,
+      '兩': 2,
+      '三': 3,
+      '四': 4,
+      '五': 5,
+      '六': 6,
+      '七': 7,
+      '八': 8,
+      '九': 9
+    };
+
+    if (raw === '十') return 10;
+    if (raw.startsWith('十') && raw.length === 2) {
+      const ones = map[raw[1]];
+      return ones != null ? 10 + ones : 0;
+    }
+    const tenIdx = raw.indexOf('十');
+    if (tenIdx > 0) {
+      const tens = map[raw[0]];
+      if (tens == null) return 0;
+      const onesChar = raw.slice(tenIdx + 1);
+      if (!onesChar) return tens * 10;
+      const ones = map[onesChar];
+      return ones != null ? tens * 10 + ones : 0;
+    }
+    return map[raw] ?? 0;
+  }
+
+  static extractStepCountFromTitle(title) {
+    const text = String(title || '').trim();
+    if (!text) return 0;
+
+    // Match Arabic numerals like "3步驟" / "3 步".
+    // Note: \b word boundaries don't work reliably with CJK text.
+    const m = text.match(/(?:^|[^0-9])(\d{1,2})\s*(步驟|步)/);
+    const n = m ? Number(m[1]) : 0;
+    if (Number.isFinite(n) && n >= 2 && n <= 9) return n;
+
+    // Match Chinese numerals like "三步驟".
+    const m2 = text.match(/([一二兩三四五六七八九十]{1,3})\s*(步驟|步)/);
+    const n2 = m2 ? this.parseCountTokenToNumber(m2[1]) : 0;
+    if (Number.isFinite(n2) && n2 >= 2 && n2 <= 9) return n2;
+
+    return 0;
+  }
+
+  static enforceStepPromise(outline) {
+    if (!outline || typeof outline !== 'object') return outline;
+
+    const stepCount = this.extractStepCountFromTitle(outline.title);
+    if (!stepCount) return outline;
+
+    const sections = Array.isArray(outline.sections) ? outline.sections.slice() : [];
+    if (sections.length === 0) return outline;
+
+    const isConclusionLike = (heading) => {
+      const h = String(heading || '').trim();
+      return /(結論|總結|行動呼籲|收斂|最後|下一步)/.test(h);
+    };
+
+    const hasAnyStepHeading = sections.some((s) => /(第\s*\d+\s*步|步驟\s*\d+|Step\s*\d+)/i.test(String(s?.heading || s?.title || '')));
+    if (hasAnyStepHeading) return outline;
+
+    const eligibleIdx = [];
+    for (let i = 0; i < sections.length; i++) {
+      const heading = sections[i]?.heading || sections[i]?.title || '';
+      if (!isConclusionLike(heading)) eligibleIdx.push(i);
+      if (eligibleIdx.length >= stepCount) break;
+    }
+
+    if (eligibleIdx.length < stepCount) return outline;
+
+    for (let step = 1; step <= stepCount; step++) {
+      const idx = eligibleIdx[step - 1];
+      const sec = { ...(sections[idx] || {}) };
+      const originalHeading = String(sec.heading || sec.title || '').trim();
+      const cleaned = originalHeading.replace(/^(第\s*\d+\s*步\s*[:：\-－]?\s*)/i, '').trim();
+      sec.heading = `第${step}步：${cleaned || `步驟 ${step}`}`;
+      delete sec.title;
+      sections[idx] = sec;
+    }
+
+    return { ...outline, sections };
+  }
   /**
    * 生成文章大綱
    */
@@ -13,15 +109,33 @@ class OutlineService {
         target_audience = '一般讀者',
         tone = '專業但易懂',
         word_count = 2500,
-        provider = 'openai', // 強制使用 OpenAI (因 Gemini 不穩定)
+        provider = process.env.AI_PROVIDER || 'openai',
         author_bio,
         author_values,
         unique_angle,
         expected_outline,
-        personal_experience
+        personal_experience,
+        brief
       } = options;
 
-      // 全面使用 Gemini
+      const normalizedBrief = normalizeContentBrief(
+        {
+          brief,
+          keyword,
+          tone,
+          target_audience,
+          author_bio,
+          author_values,
+          unique_angle,
+          expected_outline,
+          personal_experience
+        },
+        { applyDefaults: Boolean(brief) }
+      );
+
+      const effectiveTone = normalizedBrief?.author?.tone || tone;
+      const effectiveAudience = normalizedBrief?.targetAudience?.scenario || target_audience;
+
       console.log(`🤖 大綱生成模型: ${provider}`);
 
       // S2 & S3: 使用 SERP 資料與競爭對手分析
@@ -60,14 +174,15 @@ class OutlineService {
 
       // 建構 Prompt
       const prompt = this.buildOutlinePrompt(keyword, serpAnalysis, competitorInsights, {
-        target_audience,
-        tone,
+        target_audience: effectiveAudience,
+        tone: effectiveTone,
         word_count,
-        author_bio,
-        author_values,
-        unique_angle,
-        expected_outline,
-        personal_experience,
+        author_bio: normalizedBrief?.author?.identity || author_bio,
+        author_values: (normalizedBrief?.author?.values || []).join('、') || author_values,
+        unique_angle: (normalizedBrief?.originality?.uniqueAngles || []).join('、') || unique_angle,
+        expected_outline: normalizedBrief?.expectedOutline || expected_outline,
+        personal_experience: normalizedBrief?.originality?.allowedCaseNotes || personal_experience,
+        brief: normalizedBrief,
         provider  // 傳入 provider 以調整 prompt 長度
       }) || `請為關鍵字「${keyword}」產生一份含 H2/H3 的文章大綱（台灣繁體中文）`;
 
@@ -147,7 +262,10 @@ class OutlineService {
       const result = await AIService.generate(prompt, aiOptions);
 
       // 解析 AI 回應（假設返回 JSON 格式）
-      const outline = this.parseOutlineResponse(result.content);
+      let outline = this.parseOutlineResponse(result.content);
+
+      // Ensure title promises (e.g., "3步驟") are actually delivered by the outline.
+      outline = this.enforceStepPromise(outline);
 
       // 🆕 附加 SERP 來源與覆蓋率指標（PAA/Top Results -> H2/H3 映射）
       const sectionsWithSources = this.attachSourcesToSections(outline.sections || [], serpAnalysis.topResults || []);
@@ -168,8 +286,8 @@ class OutlineService {
         },
         serp_coverage: serpCoverage,
         metadata: {
-          target_audience,
-          tone,
+          target_audience: effectiveAudience,
+          tone: effectiveTone,
           estimated_word_count: word_count,
           generated_at: new Date().toISOString()
         }
@@ -184,7 +302,9 @@ class OutlineService {
    * 建構大綱生成 Prompt
    */
   static buildOutlinePrompt(keyword, serpAnalysis, competitorInsights, options) {
-    const { target_audience, tone, word_count, author_bio, author_values, unique_angle, expected_outline, personal_experience, provider = 'openai' } = options;
+    const { target_audience, tone, word_count, author_bio, author_values, unique_angle, expected_outline, personal_experience, brief, provider = 'openai' } = options;
+
+    const briefBlock = formatContentBriefForPrompt(brief);
 
     // 提取 SERP 關鍵資訊 (S2)
     const topTitles = serpAnalysis.topResults?.slice(0, 5).map(r => r.title).join('\n- ') || '';
@@ -222,6 +342,8 @@ class OutlineService {
 
       return `你是專業 SEO 策劃師，為「${keyword}」設計文章大綱。
 
+${briefBlock}
+
 **嚴格限制**
 - 總字數: ${word_count} 字
 - 主章節: ${targetSections} 個（H2，必須是 SCQA 對應章節）
@@ -252,15 +374,16 @@ ${experienceText}
 5. 每個 H2 下必須有 1-2 個 H3 子標題（不超過2個），形成完整層級。
 6. **PAA 整合**：必須將 PAA (People Also Ask) 的前 3 題融入 H2/H3 標題。
 7. **實證要求**：每個 H2 需規劃「具體案例 / 可執行做法 / 可信數據佔位符」其一；**避免無來源的百分比統計**。
+8. **避免模板化**：除非 brief.deliverables.mustInclude 要求 steps/checklist，或標題/keyword 本身承諾「X步驟/流程」，否則不要寫「第1步/3步驟/5大重點」這類數字模板標題。
 
 **標題要求**
 - H2 標題需含語意化關鍵字（如「${keyword}」的變形詞）
-- 禁止使用「深入探討」「全面解析」等空泛詞，改用具體動作詞（如「3步驟掌握」「5大誤區避免」）
+- 禁止使用「深入探討」「全面解析」等空泛詞，改用具體結果/場景詞（例如「實際費用範圍」「如何落地」）；不要用「3步驟/5大誤區」模板，除非 brief 明確要求步驟或清單。
 
 **JSON輸出（無其他文字）：**
 \`\`\`json
 {
-  "title": "含${keyword}，60字內，加誘因詞（如：新手必讀/完整攻略/3步驟）",
+  "title": "含${keyword}，60字內，加誘因詞（如：新手必讀/完整攻略）；除非 brief 要求，避免使用『X步驟/第1步』模板",
   "meta_description": "140-160字，重申${keyword}，含行動呼籲",
   "introduction": {"hook":"吸睛開場（故事/痛點/情境；避免無來源的百分比統計）","context":"S現狀+C衝突","thesis":"Q核心問題陳述"},
   "sections": [{"heading":"主標題文字（SCQA-Q或A階段，含關鍵字變形，不要加H2:前綴）","key_points":["具體重點1","具體重點2"],"subsections":[{"heading":"子主題（不要加H3:前綴）","description":"1-2句說明"}],"estimated_words":${wordsPerSection}}],

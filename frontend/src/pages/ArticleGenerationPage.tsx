@@ -16,6 +16,8 @@ export default function ArticleGenerationPage() {
   const [initializing, setInitializing] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  const [researchMultiplier, setResearchMultiplier] = useState<number>(1);
+
   // Outline telemetry for SERP coverage & sources
   const [outlineInfo, setOutlineInfo] = useState<{
     coverage?: any;
@@ -120,7 +122,7 @@ export default function ArticleGenerationPage() {
       let serpData = null;
       try {
         setGenerationStatus('正在分析 Google SERP 資料...');
-        const serpRes = await researchAPI.analyzeKeyword(keyword);
+        const serpRes = await researchAPI.analyzeKeyword(keyword, researchMultiplier);
         serpData = serpRes.data.data;
         console.log('✅ SERP 分析完成:', serpData);
       } catch (serpError) {
@@ -301,6 +303,21 @@ export default function ArticleGenerationPage() {
               </button>
             </div>
           </form>
+
+          <div className="w-full max-w-3xl flex items-center justify-center gap-3 text-sm text-gray-600">
+            <label className="text-gray-600">Research 深度</label>
+            <select
+              value={researchMultiplier}
+              onChange={(e) => setResearchMultiplier(Number(e.target.value))}
+              className="rounded-lg border border-gray-200 px-3 py-2 bg-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            >
+              <option value={1}>x1（預設）</option>
+              <option value={2}>x2</option>
+              <option value={3}>x3</option>
+              <option value={4}>x4</option>
+            </select>
+            <span className="text-xs text-gray-400">越高越慢、成本越高</span>
+          </div>
 
           {/* Advanced controls */}
           <div className="w-full max-w-3xl bg-white border border-gray-200 rounded-2xl shadow-sm p-5 space-y-4">

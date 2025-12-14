@@ -81,9 +81,11 @@ class SEOOptimizer {
     const plainText = text.replace(/<[^>]*>/g, '').replace(/\s+/g, '');
     const totalChars = plainText.length;
 
-    // 計算關鍵字出現次數（不區分大小寫）
-    const regex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    const matches = text.match(regex);
+    // 關鍵字匹配：對齊 SEO 與 strict gate 的「空白不敏感」邏輯。
+    // 例如："失眠 怎麼改善" 應視為可匹配 "失眠怎麼改善"。
+    const normalizedKeyword = String(keyword || '').replace(/\s+/g, '');
+    const regex = new RegExp(normalizedKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const matches = plainText.match(regex);
     const count = matches ? matches.length : 0;
 
     // 計算密度
@@ -258,21 +260,34 @@ class SEOOptimizer {
    * 生成 SEO 報告
    */
   static generateSEOReport(article, targetKeyword) {
-    const fullContent = JSON.stringify(article);
-    const stats = this.calculateKeywordStats(fullContent, targetKeyword);
+    // 注意：article 本體的 sections.html 通常不包含 <h2>（由輸出層統一插入）。
+    // 因此 SEO 報告需基於「接近最終輸出」的 HTML 來計算標題結構。
+    const content = article?.content || {};
+    const introHtml = content?.introduction?.html || '';
+    const conclusionHtml = content?.conclusion?.html || '';
+    const sections = Array.isArray(content?.sections) ? content.sections : [];
+
+    const renderedLikeHtml = [
+      `<h1>${article?.title || ''}</h1>`,
+      introHtml,
+      sections.map((s) => `<h2>${s.heading || ''}</h2>\n${s.html || ''}`).join('\n'),
+      conclusionHtml
+    ].join('\n');
+
+    const stats = this.calculateKeywordStats(renderedLikeHtml, targetKeyword);
 
     // 計算標題數量
-    const h2Matches = fullContent.match(/<h2>/g);
+    const h2Matches = renderedLikeHtml.match(/<h2>/g);
     const h2Count = h2Matches ? h2Matches.length : 0;
 
-    const h3Matches = fullContent.match(/<h3>/g);
+    const h3Matches = renderedLikeHtml.match(/<h3>/g);
     const h3Count = h3Matches ? h3Matches.length : 0;
 
     // 計算連結數量
-    const externalLinkMatches = fullContent.match(/<a href="http/g);
+    const externalLinkMatches = renderedLikeHtml.match(/<a href="http/g);
     const externalLinks = externalLinkMatches ? externalLinkMatches.length : 0;
 
-    const internalLinkMatches = fullContent.match(/<a href="[^h]/g);
+    const internalLinkMatches = renderedLikeHtml.match(/<a href="[^h]/g);
     const internalLinks = internalLinkMatches ? internalLinkMatches.length : 0;
 
     return {

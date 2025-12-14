@@ -67,10 +67,10 @@ export const projectAPI = {
 
 // ==================== Research API ====================
 export const researchAPI = {
-  analyzeKeyword: (keyword: string) =>
-    apiClient.post('/research/analyze-keyword', { keyword }),
-  analyzeBatch: (projectId: string, keywords: string[]) =>
-    apiClient.post('/research/analyze-batch', { project_id: projectId, keywords }),
+  analyzeKeyword: (keyword: string, researchMultiplier: number = 1) =>
+    apiClient.post('/research/analyze-keyword', { keyword, research_multiplier: researchMultiplier }),
+  analyzeBatch: (projectId: string, keywords: string[], researchMultiplier: number = 1) =>
+    apiClient.post('/research/analyze-batch', { project_id: projectId, keywords, research_multiplier: researchMultiplier }),
   getRelatedSearches: (keyword: string) =>
     apiClient.get('/research/related-searches', { params: { keyword } }),
   expandKeywords: (seedKeyword: string, projectId: string) =>
