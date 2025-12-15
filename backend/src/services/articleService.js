@@ -1158,13 +1158,26 @@ ${html}
       const actionSafetyCheck = this.evaluateActionSafety(fullArticle, contentDomain);
       const sourceCoverage = this.computeSourceCoverage(fullArticle, verifiedSources, contentDomain, minSourcesRequired);
 
+      // 🆕 SEO 專家建議驗證
+      const wordCountCheck = this.validateWordCount(fullArticle, 2200);
+      const titleLengthCheck = this.validateTitleLength(fullArticle.title);
+      const introStructureCheck = this.validateIntroStructure(
+        fullArticle.content?.introduction?.html || fullArticle.content_draft?.introduction?.html
+      );
+      const casePresenceCheck = this.validateCasePresence(fullArticle);
+
       deterministicReport.checks = {
         ...(deterministicReport.checks || {}),
         schema: schemaCheck,
         source_minimum: sourceAvailability,
         source_coverage: sourceCoverage,
         action_safety: actionSafetyCheck,
-        reader_evaluation: deterministicReport.reader_evaluation || null
+        reader_evaluation: deterministicReport.reader_evaluation || null,
+        // SEO 專家建議檢查
+        word_count: wordCountCheck,
+        title_length: titleLengthCheck,
+        intro_structure: introStructureCheck,
+        case_presence: casePresenceCheck
       };
 
       if (!schemaCheck.passed) {
@@ -1198,6 +1211,47 @@ ${html}
             count: 1,
             samples: [`available=${sourceCoverage.available}, coverage=${sourceCoverage.coverageRatio.toFixed(2)}`]
           }]
+        });
+      }
+
+      // 🆕 SEO 專家建議檢查的 warnings
+      if (!wordCountCheck.passed) {
+        this.appendQualityFinding(deterministicReport, {
+          rule_id: 'seo.word_count.too_long',
+          severity: 'warn',
+          message: wordCountCheck.recommendation || `字數超標 ${wordCountCheck.overBy} 字，建議精簡至 2000 字內`,
+          total_count: 1,
+          fields: [{ field: 'word_count', count: 1, samples: [`actual=${wordCountCheck.actual}, max=${wordCountCheck.max}`] }]
+        });
+      }
+
+      if (!titleLengthCheck.passed) {
+        this.appendQualityFinding(deterministicReport, {
+          rule_id: titleLengthCheck.tooShort ? 'seo.title.too_short' : 'seo.title.too_long',
+          severity: 'warn',
+          message: titleLengthCheck.recommendation || '標題長度不符合長尾關鍵字要求（35-55字）',
+          total_count: 1,
+          fields: [{ field: 'title', count: 1, samples: [`length=${titleLengthCheck.length}`] }]
+        });
+      }
+
+      if (!introStructureCheck.passed) {
+        this.appendQualityFinding(deterministicReport, {
+          rule_id: 'seo.intro.second_para_answer',
+          severity: 'warn',
+          message: introStructureCheck.recommendation || '引言第二段應直接回答核心問題（Featured Snippet 優化）',
+          total_count: 1,
+          fields: [{ field: 'introduction', count: 1, samples: [`paragraphs=${introStructureCheck.paragraphCount}, hasAnswer=${introStructureCheck.hasAnswerInSecondPara}`] }]
+        });
+      }
+
+      if (!casePresenceCheck.passed) {
+        this.appendQualityFinding(deterministicReport, {
+          rule_id: 'seo.case.missing',
+          severity: 'warn',
+          message: casePresenceCheck.recommendation || '建議加入具體案例或解決方案（提升 E-E-A-T）',
+          total_count: 1,
+          fields: [{ field: 'content', count: 1, samples: ['無明顯案例/故事/解決方案標記'] }]
         });
       }
 
@@ -1323,17 +1377,32 @@ ${expected_outline}
 
 ${travelDeliverable}
 
+## 🎯 核心結構：「第二段回答」原則（SEO Featured Snippet 優化）
+**引言必須包含 3 段結構（這是 Google Featured Snippet 擷取的關鍵）：**
+
+1. **第一段（痛點情境）**：30-50字，直接點出讀者情境/問題
+   - ❌ 不要：問句開場、模板鋪陳（「你是否也曾...」）
+   - ✅ 範例：「月薪3萬，扣完房租生活費剩不多，但又怕錢放著貶值——這是多數小資族面對『投資理財』的第一道坎。」
+
+2. **第二段（核心答案摘要）**：80-120字，**直接給出答案摘要**
+   - 這段是 Google Featured Snippet 擷取的關鍵！必須直接回答標題/關鍵字的核心問題。
+   - ✅ 範例：「簡單說：先存3-6個月緊急預備金，再用『631法則』分配：60%生活開銷、30%儲蓄投資、10%自我提升。投資部分建議從低成本的 ETF（如0050）開始，每月定期定額3000元即可。」
+   - ✅ 範例：「關鍵在於：睡前2小時停用3C、室溫控制在18-22度、固定時間上床。若仍無法入睡超過20分鐘，起身做輕鬆活動，等有睡意再回床上。」
+
+3. **第三段（本文預告）**：40-60字，說明文章會提供什麼
+   - ✅ 範例：「下面我會帶你走過：預備金怎麼算、哪些工具適合新手、以及 3 個最常踩的雷怎麼避開。」
+
+**自我檢查（輸出前必做）**：確認第二段是否**直接回答標題/關鍵字的核心問題**？若否，請重寫。
+
 ## 寫作要求
 1. **專業但誠實**：使用第三人稱或客觀描述，避免虛構個人經驗。
 2. **痛點共鳴**：開場直接切入讀者痛點，可用情境/例子/普遍觀察；**不要硬塞百分比統計**。
-3. **直接交付價值**：用一兩句話說清楚讀者會拿到什麼（例如：行程快覽、決策順序、避免踩雷清單）。
-4. **避免模板問句開場**：不要用「你是否也曾/是否也曾/你是不是也…」這類問句起手式，直接陳述情境與行動。
-4. **稱呼一致**：全篇一律使用「你／你的」，不要使用「您／您的」。
-5. **避免口號句**：不要寫「讓我們一起啟程吧／一起開始吧」這類口號；用更直接的資訊與可執行建議取代。
-4. **自然融入關鍵字**：主要關鍵字「${outline.keywords?.primary}」必須在引言中出現至少2次，以自然的方式融入句子中，避免堆砌或生硬插入。目標密度0.8%-1.2%。
-5. 字數控制在 200-300 字（較長的引言有利於SEO）
-6. 語氣：${style_guide?.tone || '專業、親切且具權威感'}
-${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
+3. **稱呼一致**：全篇一律使用「你／你的」，不要使用「您／您的」。
+4. **避免口號句**：不要寫「讓我們一起啟程吧／一起開始吧」這類口號；用更直接的資訊與可執行建議取代。
+5. **自然融入關鍵字**：主要關鍵字「${outline.keywords?.primary}」必須在引言中出現至少2次，以自然的方式融入句子中，避免堆砌或生硬插入。目標密度0.8%-1.2%。
+6. 字數控制在 250-350 字（含三段結構）
+7. 語氣：${style_guide?.tone || '專業、親切且具權威感'}
+${style_guide ? `8. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 
 ## 事實與數據規則（非常重要）
 1. **禁止編造統計**：不要寫「根據統計、超過70%、多數人」這類具體百分比或數量，除非參考文獻庫中有清楚的對應描述。
@@ -2283,6 +2352,85 @@ ${userInput}
     const englishWords = (textToCount.match(/[a-zA-Z]+/g) || []).length;
     
     return chineseChars + englishWords;
+  }
+
+  /**
+   * SEO 專家建議 - 驗證字數控制（目標 ~2000 字）
+   */
+  static validateWordCount(article, maxWords = 2200) {
+    const wordCount = this.calculateWordCount(article.content || article.content_draft || {});
+    return {
+      actual: wordCount,
+      max: maxWords,
+      passed: wordCount <= maxWords,
+      overBy: Math.max(0, wordCount - maxWords),
+      recommendation: wordCount > maxWords ? `建議精簡內容，目前超出 ${wordCount - maxWords} 字` : null
+    };
+  }
+
+  /**
+   * SEO 專家建議 - 驗證標題長度（長尾關鍵字要求 35-55 字）
+   */
+  static validateTitleLength(title, minChars = 25, maxChars = 60) {
+    const len = String(title || '').trim().length;
+    return {
+      length: len,
+      passed: len >= minChars && len <= maxChars,
+      tooShort: len < minChars,
+      tooLong: len > maxChars,
+      recommendation: len < minChars ? '標題過短，建議加入具體情境/數字/對象（長尾關鍵字）' : 
+                      len > maxChars ? '標題過長，建議精簡至 55 字內' : null
+    };
+  }
+
+  /**
+   * SEO 專家建議 - 驗證引言結構（第二段回答核心問題）
+   */
+  static validateIntroStructure(introHtml) {
+    const paragraphs = (introHtml || '').match(/<p>[\s\S]*?<\/p>/gi) || [];
+    const hasMinParagraphs = paragraphs.length >= 2;
+    
+    // 檢查第二段是否包含答案型內容
+    const secondPara = paragraphs[1] || '';
+    const secondParaText = this.stripHtml(secondPara);
+    const hasAnswerSignals = /(簡單說|答案是|關鍵在於|重點是|首先|步驟|方法|做法|建議|可以|應該)/.test(secondParaText);
+    const secondParaLength = secondParaText.length;
+    
+    return {
+      paragraphCount: paragraphs.length,
+      secondParagraphLength: secondParaLength,
+      hasAnswerInSecondPara: hasAnswerSignals && secondParaLength >= 60,
+      passed: hasMinParagraphs && hasAnswerSignals && secondParaLength >= 60,
+      recommendation: !hasMinParagraphs ? '引言需至少 2 段' :
+                      !hasAnswerSignals || secondParaLength < 60 ? '第二段應直接回答核心問題（80-120字）' : null
+    };
+  }
+
+  /**
+   * SEO 專家建議 - 驗證案例存在（真實經驗與解決方案）
+   */
+  static validateCasePresence(article) {
+    const allHtml = [
+      article.content?.introduction?.html || article.content_draft?.introduction?.html,
+      ...(article.content?.sections || article.content_draft?.sections || []).map(s => s.html),
+      article.content?.conclusion?.html || article.content_draft?.conclusion?.html
+    ].filter(Boolean).join('\n');
+    
+    const caseSignals = [
+      /<h3[^>]*>[^<]*(案例|實例|故事|經驗|情境)[^<]*<\/h3>/i,
+      /(案例|實例|故事|情境)[：:]/,
+      /月薪\s*\d+[KkＫ萬]?\s*[的]?(上班族|新手|小資|年輕人)/,
+      /\d+\s*(年|個月).*存到?\s*\d+\s*(萬|元)/,
+      /常見(錯誤|問題|迷思).*解(法|決|答)/i,
+      /<h[23][^>]*>[^<]*(解決方案|如何解決|常見問題|避免錯誤)[^<]*<\/h[23]>/i
+    ];
+    
+    const hasCaseContent = caseSignals.some(pattern => pattern.test(allHtml));
+    
+    return {
+      passed: hasCaseContent,
+      recommendation: hasCaseContent ? null : '建議加入具體案例或常見問題解法（提升 E-E-A-T 與 SEO 競爭力）'
+    };
   }
 
   /**

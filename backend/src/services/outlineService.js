@@ -108,7 +108,7 @@ class OutlineService {
         serp_data = null,
         target_audience = '一般讀者',
         tone = '專業但易懂',
-        word_count = 2500,
+        word_count = 2000,
         provider = process.env.AI_PROVIDER || 'openai',
         author_bio,
         author_values,
@@ -337,8 +337,8 @@ class OutlineService {
 
     // OpenAI 簡化版 Prompt (節省 token)
     if (provider === 'openai') {
-      const targetSections = Math.min(Math.max(Math.ceil(word_count / 600), 4), 5); // 4-5個章節
-      const wordsPerSection = Math.floor((word_count - 400) / targetSections); // 扣除前言+結論
+      const targetSections = Math.min(Math.max(Math.ceil(word_count / 500), 3), 4); // 3-4個章節（避免過長）
+      const wordsPerSection = Math.floor((word_count - 350) / targetSections); // 扣除前言+結論
 
       return `你是專業 SEO 策劃師，為「${keyword}」設計文章大綱。
 
@@ -374,7 +374,8 @@ ${experienceText}
 5. 每個 H2 下必須有 1-2 個 H3 子標題（不超過2個），形成完整層級。
 6. **PAA 整合**：必須將 PAA (People Also Ask) 的前 3 題融入 H2/H3 標題。
 7. **實證要求**：每個 H2 需規劃「具體案例 / 可執行做法 / 可信數據佔位符」其一；**避免無來源的百分比統計**。
-8. **避免模板化**：除非 brief.deliverables.mustInclude 要求 steps/checklist，或標題/keyword 本身承諾「X步驟/流程」，否則不要寫「第1步/3步驟/5大重點」這類數字模板標題。
+8. **案例/解法必備（SEO競爭力）**：至少一個 H2 或 H3 必須包含以下之一：\n   - 具體案例（真實情境、數字、結果）\n   - 常見問題 + 解法配對\n   - 比較表/決策矩陣\n   範例 H3：「案例：月薪35K上班族如何2年存到50萬」\n   範例 H3：「3個常見錯誤與解法」
+9. **避免模板化**：除非 brief.deliverables.mustInclude 要求 steps/checklist，或標題/keyword 本身承諾「X步驟/流程」，否則不要寫「第1步/3步驟/5大重點」這類數字模板標題。
 
 **標題要求**
 - H2 標題需含語意化關鍵字（如「${keyword}」的變形詞）
@@ -383,7 +384,7 @@ ${experienceText}
 **JSON輸出（無其他文字）：**
 \`\`\`json
 {
-  "title": "含${keyword}，60字內，加誘因詞（如：新手必讀/完整攻略）；除非 brief 要求，避免使用『X步驟/第1步』模板",
+  "title": "長尾標題要求（SEO競爭力優化）：\n    1. 包含主關鍵字「${keyword}」\n    2. 加入具體情境/數字/對象（如：月薪3萬/2025年/5天4夜/新手）\n    3. 35-55字（不要太短），包含誘因詞\n    4. 範例：『月薪3萬新手如何開始理財？2025年小資族5步驟存到第一桶金』\n    禁止：過短的『新手理財入門指南』或『懶人包』這類標題",
   "meta_description": "140-160字，SEO專家級寫作：關鍵字前置、具備強烈點擊誘因(CTR)、包含行動呼籲",
   "introduction": {"hook":"吸睛開場（故事/痛點/情境；避免無來源的百分比統計）","context":"S現狀+C衝突","thesis":"Q核心問題陳述"},
   "sections": [{"heading":"主標題文字（SCQA-Q或A階段，含關鍵字變形，不要加H2:前綴）","key_points":["具體重點1","具體重點2"],"subsections":[{"heading":"子主題（不要加H3:前綴）","description":"1-2句說明"}],"estimated_words":${wordsPerSection}}],
