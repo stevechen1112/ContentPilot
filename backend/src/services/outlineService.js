@@ -384,7 +384,7 @@ ${experienceText}
 \`\`\`json
 {
   "title": "含${keyword}，60字內，加誘因詞（如：新手必讀/完整攻略）；除非 brief 要求，避免使用『X步驟/第1步』模板",
-  "meta_description": "140-160字，重申${keyword}，含行動呼籲",
+  "meta_description": "140-160字，SEO專家級寫作：關鍵字前置、具備強烈點擊誘因(CTR)、包含行動呼籲",
   "introduction": {"hook":"吸睛開場（故事/痛點/情境；避免無來源的百分比統計）","context":"S現狀+C衝突","thesis":"Q核心問題陳述"},
   "sections": [{"heading":"主標題文字（SCQA-Q或A階段，含關鍵字變形，不要加H2:前綴）","key_points":["具體重點1","具體重點2"],"subsections":[{"heading":"子主題（不要加H3:前綴）","description":"1-2句說明"}],"estimated_words":${wordsPerSection}}],
   "conclusion": {"summary":"總結核心價值","call_to_action":"明確CTA（如：立即下載/開始實踐）"},
@@ -448,7 +448,7 @@ ${competitorStructureInfo || '無詳細結構資料，請參考上方標題'}
 \`\`\`json
 {
   "title": "SEO 優化後的文章標題（60字以內，包含關鍵字）",
-  "meta_description": "140-160 字的 meta description",
+  "meta_description": "140-160 字，SEO專家級寫作：關鍵字前置、具備強烈點擊誘因(CTR)、包含行動呼籲",
   "introduction": {
     "hook": "開場引言（吸引讀者注意）",
     "context": "背景介紹（建立情境 - SCQA 的 S）",

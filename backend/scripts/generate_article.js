@@ -453,11 +453,20 @@ async function main() {
         a:hover { text-decoration: underline; }
         .article-footer { background: #f9f9f9; padding: 20px; margin-top: 40px; border-radius: 8px; }
         .disclaimer { font-size: 0.9em; color: #666; margin-top: 15px; }
+        .meta-box { background: #e8f4f8; padding: 15px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #2980b9; color: #555; font-size: 0.95em; }
+        .meta-label { font-weight: bold; color: #2980b9; display: block; margin-bottom: 5px; font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; }
     </style>
 </head>
 <body>
     <article>
-        <h1>${draft.title}</h1>\n\n`;
+        <h1>${draft.title}</h1>
+
+        <div class="meta-box">
+            <span class="meta-label">SEO Meta Description</span>
+            ${metaDescription}
+        </div>
+
+`;
     
     if (draft.content && draft.content.introduction && draft.content.introduction.html) {
         html += `        <div class="introduction">\n${draft.content.introduction.html}\n        </div>\n\n`;
