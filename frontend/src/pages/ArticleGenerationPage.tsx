@@ -316,7 +316,7 @@ export default function ArticleGenerationPage() {
               <option value={3}>x3</option>
               <option value={4}>x4</option>
             </select>
-            <span className="text-xs text-gray-400">越高越慢、成本越高</span>
+            <span className="text-xs text-gray-400">越高、研究越深入、越花時間</span>
           </div>
 
           {/* Advanced controls */}
