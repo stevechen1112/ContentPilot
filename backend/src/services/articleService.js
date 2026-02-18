@@ -4,172 +4,99 @@ const SEOOptimizer = require('./seoOptimizer');
 const AuthoritySourceService = require('./authoritySourceService');
 const ContentQualityValidator = require('./contentQualityValidator');
 const ContentQualityReportService = require('./contentQualityReportService');
+const ObservabilityService = require('./observabilityService');
 const {
   normalizeContentBrief,
   formatContentBriefForPrompt,
   validateContentBriefRequiredFields
 } = require('./contentBrief');
 
+// ─── Sub-modules (ARCH-01) ────────────────────────────────────────────────────
+const {
+  parseCountTokenToNumber: _parseCountTokenToNumber,
+  numberToChineseNumeral: _numberToChineseNumeral,
+  extractCountPromiseFromHeading: _extractCountPromiseFromHeading,
+  countLabeledSubheadings: _countLabeledSubheadings,
+  extractLabeledOrdinalSet: _extractLabeledOrdinalSet,
+  buildPromiseGuardForPrompt: _buildPromiseGuardForPrompt,
+} = require('./article/chineseNumerals');
+
+const {
+  stripLinksAndUrls: _stripLinksAndUrls,
+  stripHtml: _stripHtml,
+  cleanMarkdownArtifacts: _cleanMarkdownArtifacts,
+  sanitizeArticleLinks: _sanitizeArticleLinks,
+  stripTemplateFooters: _stripTemplateFooters,
+  hasUnsupportedStatClaims: _hasUnsupportedStatClaims,
+  hasListicleOrBooklistCues: _hasListicleOrBooklistCues,
+} = require('./article/htmlPurifier');
+
+const {
+  detectDomain: _detectDomain,
+  minSourcesForDomain: _minSourcesForDomain,
+  computeRequiredSources: _computeRequiredSources,
+  buildSchemaValidation: _buildSchemaValidation,
+  buildSourceAvailability: _buildSourceAvailability,
+  computeSourceCoverage: _computeSourceCoverage,
+  evaluateActionSafety: _evaluateActionSafety,
+  determineDomain: _determineDomain,
+  generateDomainAwareDisclaimer: _generateDomainAwareDisclaimer,
+} = require('./article/domainUtils');
+// ─────────────────────────────────────────────────────────────────────────────
+
 class ArticleService {
-  static parseCountTokenToNumber(token) {
-    const raw = String(token || '').trim();
-    if (!raw) return null;
-    if (/^\d+$/.test(raw)) {
-      const n = Number(raw);
-      return Number.isFinite(n) ? n : null;
-    }
+  // ── chineseNumerals delegates ─────────────────────────────────────────────
+  static parseCountTokenToNumber(token) { return _parseCountTokenToNumber(token); }
+  static numberToChineseNumeral(n) { return _numberToChineseNumeral(n); }
+  static extractCountPromiseFromHeading(heading) { return _extractCountPromiseFromHeading(heading); }
+  static countLabeledSubheadings(html, label) { return _countLabeledSubheadings(html, label); }
+  static extractLabeledOrdinalSet(html, label) { return _extractLabeledOrdinalSet(html, label); }
+  static buildPromiseGuardForPrompt(sectionHeading, promise) { return _buildPromiseGuardForPrompt(sectionHeading, promise); }
 
-    // Basic Chinese numerals (supports 1-99 for our headline promises)
-    const map = {
-      '零': 0,
-      '一': 1,
-      '二': 2,
-      '兩': 2,
-      '三': 3,
-      '四': 4,
-      '五': 5,
-      '六': 6,
-      '七': 7,
-      '八': 8,
-      '九': 9
+  // ── htmlPurifier delegates ────────────────────────────────────────────────
+  static stripLinksAndUrls(html) { return _stripLinksAndUrls(html); }
+  static stripHtml(html) { return _stripHtml(html); }
+  static cleanMarkdownArtifacts(content) { return _cleanMarkdownArtifacts(content); }
+  static sanitizeArticleLinks(article) { return _sanitizeArticleLinks(article); }
+  static stripTemplateFooters(article) { return _stripTemplateFooters(article); }
+  static hasUnsupportedStatClaims(html) { return _hasUnsupportedStatClaims(html); }
+  static hasListicleOrBooklistCues(html) { return _hasListicleOrBooklistCues(html); }
+
+  // ── domainUtils delegates ─────────────────────────────────────────────────
+  static detectDomain(outline) { return _detectDomain(outline); }
+  static minSourcesForDomain(domain) { return _minSourcesForDomain(domain); }
+  static computeRequiredSources(brief, domain) { return _computeRequiredSources(brief, domain); }
+  static buildSchemaValidation(brief, keyword, domain) { return _buildSchemaValidation(brief, keyword, domain); }
+  static buildSourceAvailability(v, min, domain) { return _buildSourceAvailability(v, min, domain); }
+  static computeSourceCoverage(article, v, domain, min) { return _computeSourceCoverage(article, v, domain, min); }
+  static evaluateActionSafety(article, domain) { return _evaluateActionSafety(article, domain); }
+  static determineDomain(title) { return _determineDomain(title); }
+  static generateDomainAwareDisclaimer(domain, usedSources = []) { return _generateDomainAwareDisclaimer(domain, usedSources); }
+
+  // ── Quality summary helpers (non-extracted) ───────────────────────────────
+  static recomputeQualitySummary(report) {
+    const counts = { error: 0, warn: 0, info: 0, total: 0 };
+    const findings = Array.isArray(report?.findings) ? report.findings : [];
+    findings.forEach((f) => {
+      counts.total += 1;
+      if (f.severity === 'error') counts.error += 1;
+      else if (f.severity === 'warn') counts.warn += 1;
+      else counts.info += 1;
+    });
+    report.summary = {
+      total_rules_hit: counts.total || 0,
+      error_rules_hit: counts.error,
+      warn_rules_hit: counts.warn,
+      info_rules_hit: counts.info
     };
-
-    if (raw === '十') return 10;
-    // e.g. 十一, 十二
-    if (raw.startsWith('十') && raw.length === 2) {
-      const ones = map[raw[1]];
-      return ones != null ? 10 + ones : null;
-    }
-    // e.g. 二十, 二十一
-    const tenIdx = raw.indexOf('十');
-    if (tenIdx > 0) {
-      const tens = map[raw[0]];
-      if (tens == null) return null;
-      const onesChar = raw.slice(tenIdx + 1);
-      if (!onesChar) return tens * 10;
-      const ones = map[onesChar];
-      return ones != null ? tens * 10 + ones : null;
-    }
-    return map[raw] ?? null;
+    report.pass = counts.error === 0;
+    return report;
   }
 
-  static extractCountPromiseFromHeading(heading) {
-    const text = String(heading || '').trim();
-    if (!text) return null;
-
-    // 若是「第X步」僅表示序位（不是承諾 X 個步驟），直接跳過
-    const ordinalStep = /^第\s*(\d+|[一二兩三四五六七八九十]{1,3})\s*步(?:\b|[：:])?/i;
-    if (ordinalStep.test(text)) return null;
-
-    // Patterns like: 3大陷阱 / 5個重點 / 三個方法 / 3步驟
-    const m = text.match(/(\d+|[一二兩三四五六七八九十]{1,3})\s*(?:大|個)?\s*(陷阱|迷思|錯誤|誤區|疑問|問題|重點|方法|技巧|步驟|步)/);
-    if (!m) return null;
-
-    const count = this.parseCountTokenToNumber(m[1]);
-    const kind = m[2];
-    if (!count || count < 2) return null;
-
-    // Map to a label prefix we can verify deterministically.
-    // For traps, we enforce 陷阱一/二/三... headings.
-    if (kind === '陷阱') {
-      return { kind: 'trap', label: '陷阱', count };
-    }
-    if (kind === '迷思') {
-      return { kind: 'myth', label: '迷思', count };
-    }
-    if (kind === '錯誤') {
-      return { kind: 'mistake', label: '錯誤', count };
-    }
-    if (kind === '誤區') {
-      return { kind: 'mistake', label: '誤區', count };
-    }
-    if (kind === '疑問') {
-      return { kind: 'question', label: '疑問', count };
-    }
-    if (kind === '問題') {
-      return { kind: 'question', label: '問題', count };
-    }
-    if (kind === '步驟') {
-      return { kind: 'step', label: '步驟', count };
-    }
-    if (kind === '步') {
-      return { kind: 'step', label: '步驟', count };
-    }
-    // For other kinds, we keep a generic hint but only hard-enforce for traps/myths/mistakes.
-    return { kind: 'generic', label: kind, count };
-  }
-
-  static countLabeledSubheadings(html, label) {
-    const out = String(html || '');
-    const lbl = String(label || '').trim();
-    if (!out || !lbl) return 0;
-
-    // Count unique indexes to avoid double counting repeated headings.
-    const hits = new Set();
-    const re = new RegExp(`<h3>\\s*${lbl}\\s*([0-9]+|[一二三四五六七八九十]+)\\s*(?:[：:]|\\s)`, 'gi');
-    let m;
-    while ((m = re.exec(out)) !== null) {
-      const token = String(m[1] || '').trim();
-      const num = this.parseCountTokenToNumber(token);
-      if (num != null) hits.add(String(num));
-      if (m.index === re.lastIndex) re.lastIndex++;
-    }
-    return hits.size;
-  }
-
-  static buildPromiseGuardForPrompt(sectionHeading, promise) {
-    if (!promise) return '';
-    if (promise.kind === 'trap') {
-      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} 大陷阱」。你必須交付 **剛好 ${promise.count} 個**陷阱，並用 <h3> 子標題標示：\n  - <h3>陷阱一：…</h3>\n  - <h3>陷阱二：…</h3>\n  - …直到 <h3>陷阱${promise.count}：…</h3>\n- 禁止只寫 2 個就收尾，也不要把陷阱塞進段落裡不做子標題。\n`;
-    }
-    if (promise.kind === 'myth') {
-      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} 大迷思」。你必須交付 **剛好 ${promise.count} 個**迷思，並用 <h3> 子標題標示：\n  - <h3>迷思一：…</h3> 直到 <h3>迷思${promise.count}：…</h3>\n`;
-    }
-    if (promise.kind === 'mistake') {
-      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} ${promise.label}」。你必須交付 **剛好 ${promise.count} 個**${promise.label}，並用 <h3> 子標題標示：\n  - <h3>${promise.label}一：…</h3> 直到 <h3>${promise.label}${promise.count}：…</h3>\n`;
-    }
-    if (promise.kind === 'question') {
-      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} 大${promise.label}」。你必須交付 **剛好 ${promise.count} 個**${promise.label}，並用 <h3> 子標題標示：\n  - <h3>${promise.label}一：…</h3>\n  - <h3>${promise.label}二：…</h3>\n  - …直到 <h3>${promise.label}${promise.count}：…</h3>\n- 禁止只寫 2 個就收尾，也不要把第 ${promise.count} 個藏在段落裡不做子標題。\n`;
-    }
-    if (promise.kind === 'step') {
-      return `\n## ✅ 承諾交付（硬規則）\n- 你的段落標題包含「${promise.count} 步驟」。你必須交付 **剛好 ${promise.count} 個**步驟，並用 <h3> 子標題標示：\n  - <h3>步驟1：…</h3> 直到 <h3>步驟${promise.count}：…</h3>\n`;
-    }
-
-    return `\n## ✅ 承諾交付（提醒）\n- 你的段落標題包含「${promise.count} ${promise.label}」。請確保內容真的交付 ${promise.count} 個要點，避免「說 ${promise.count} 個但只寫 2 個」。\n`;
-  }
-
-  static numberToChineseNumeral(n) {
-    const map = {
-      0: '零',
-      1: '一',
-      2: '二',
-      3: '三',
-      4: '四',
-      5: '五',
-      6: '六',
-      7: '七',
-      8: '八',
-      9: '九',
-      10: '十'
-    };
-    return map[n] || String(n);
-  }
-
-  static extractLabeledOrdinalSet(html, label) {
-    const out = String(html || '');
-    const lbl = String(label || '').trim();
-    const hits = new Set();
-    if (!out || !lbl) return hits;
-
-    const re = new RegExp(`<h3>\\s*${lbl}\\s*([0-9]+|[一二三四五六七八九十]+)\\s*(?:[：:]|\\s)`, 'gi');
-    let m;
-    while ((m = re.exec(out)) !== null) {
-      const token = String(m[1] || '').trim();
-      const num = this.parseCountTokenToNumber(token);
-      if (num != null) hits.add(num);
-      if (m.index === re.lastIndex) re.lastIndex++;
-    }
-    return hits;
+  static appendQualityFinding(report, finding) {
+    if (!report.findings) report.findings = [];
+    report.findings.push(finding);
+    return this.recomputeQualitySummary(report);
   }
 
   static async appendMissingPromisedItemsIfNeeded(sectionHeading, html, outline, options) {
@@ -227,6 +154,7 @@ class ArticleService {
       return html;
     }
   }
+
   static redactReferenceFullContent(article) {
     // Remove potentially large/copyright-sensitive fields from returned outputs.
     // Keep url/title/snippet/credibility for traceability, but drop fullContent.
@@ -272,162 +200,6 @@ class ArticleService {
     }
 
     return lines.join('\n');
-  }
-  static detectDomain(outline) {
-    const text = `${outline?.keywords?.primary || ''} ${outline?.title || ''}`;
-    const lower = text.toLowerCase();
-    const financeTokens = ['理財', '投資', '股票', 'etf', '基金', '債券', '資產配置', '退休', '保險', '貸款', '信用卡'];
-    const healthTokens = ['失眠', '睡眠', '健康', '飲食', '疼痛', '上背痛', '運動', '疾病', '症狀'];
-    const travelTokens = [
-      '旅遊', '旅行', '自由行', '行程', '行程規劃', '行程安排', '景點', '住宿', '交通', '機票', '飯店',
-      '5天4夜', '4天3夜', '3天2夜',
-      '東京', '大阪', '京都', '沖繩', '札幌', '福岡', '名古屋',
-      'jr', 'metro', '地鐵', '新幹線', '一日券'
-    ];
-
-    if (financeTokens.some(t => text.includes(t) || lower.includes(t))) return 'finance';
-    if (healthTokens.some(t => text.includes(t) || lower.includes(t))) return 'health';
-    if (travelTokens.some(t => text.includes(t) || lower.includes(t))) return 'travel';
-    return 'general';
-  }
-
-  static minSourcesForDomain(domain) {
-    if (domain === 'health') return 2;
-    if (domain === 'finance') return 2;
-    if (domain === 'travel') return 1;
-    return 0;
-  }
-
-  static computeRequiredSources(brief, domain) {
-    const domainMin = this.minSourcesForDomain(domain);
-    const briefRequireSources = brief?.credibility?.requireSources;
-    const briefMin = Number.isFinite(Number(brief?.credibility?.minSources))
-      ? Number(brief.credibility.minSources)
-      : undefined;
-    if (briefRequireSources === false) return 0;
-    return Math.max(domainMin, briefMin ?? 0);
-  }
-
-  static buildSchemaValidation(brief, keyword, domain) {
-    const missing = validateContentBriefRequiredFields(brief || {}, { keyword });
-    return {
-      domain,
-      passed: missing.length === 0,
-      missing
-    };
-  }
-
-  static recomputeQualitySummary(report) {
-    const counts = { error: 0, warn: 0, info: 0, total: 0 };
-    const findings = Array.isArray(report?.findings) ? report.findings : [];
-    findings.forEach((f) => {
-      counts.total += 1;
-      if (f.severity === 'error') counts.error += 1;
-      else if (f.severity === 'warn') counts.warn += 1;
-      else counts.info += 1;
-    });
-
-    report.summary = {
-      total_rules_hit: counts.total || 0,
-      error_rules_hit: counts.error,
-      warn_rules_hit: counts.warn,
-      info_rules_hit: counts.info
-    };
-    report.pass = counts.error === 0;
-    return report;
-  }
-
-  static appendQualityFinding(report, finding) {
-    if (!report.findings) report.findings = [];
-    report.findings.push(finding);
-    return this.recomputeQualitySummary(report);
-  }
-
-  static stripTemplateFooters(article) {
-    const cleanHtml = (html) => {
-      if (!html) return html;
-      let out = String(html);
-      out = out.replace(/<div class="article-footer"[\s\S]*?<\/div>/gi, '');
-      out = out.replace(/<hr\s*\/>\s*$/gi, '').trim();
-      return out;
-    };
-
-    if (article?.content?.introduction?.html) {
-      const html = cleanHtml(article.content.introduction.html);
-      article.content.introduction.html = html;
-      article.content.introduction.plain_text = this.stripHtml(html);
-    }
-
-    if (Array.isArray(article?.content?.sections)) {
-      article.content.sections = article.content.sections.map((s) => {
-        if (!s?.html) return s;
-        const html = cleanHtml(s.html);
-        return { ...s, html, plain_text: this.stripHtml(html) };
-      });
-    }
-
-    if (article?.content?.conclusion?.html) {
-      const html = cleanHtml(article.content.conclusion.html);
-      article.content.conclusion.html = html;
-      article.content.conclusion.plain_text = this.stripHtml(html);
-    }
-
-    return article;
-  }
-
-  static evaluateActionSafety(article, domain) {
-    const segments = [];
-    if (article?.content?.introduction?.html) segments.push(article.content.introduction.html);
-    if (Array.isArray(article?.content?.sections)) {
-      article.content.sections.forEach((s) => s?.html && segments.push(s.html));
-    }
-    if (article?.content?.conclusion?.html) segments.push(article.content.conclusion.html);
-
-    const joinedHtml = segments.join('\n');
-    const text = this.stripHtml(joinedHtml);
-
-    const actionHeading = /<h3[^>]*>[^<]{0,40}(行動|步驟|清單|操作|流程|做法|指南)[^<]*<\/h3>/i.test(joinedHtml);
-    const actionList = /<(ol|ul)[^>]*>/i.test(joinedHtml);
-    const actionKeyword = /(行動|步驟|清單|操作|練習|計畫|流程)/.test(text);
-    const action_block = Boolean(actionList && (actionHeading || actionKeyword));
-
-    const safetyHeading = /<h3[^>]*>[^<]{0,40}(風險|安全|禁忌|就醫|注意|副作用|停止|不適)[^<]*<\/h3>/i.test(joinedHtml);
-    const safetyKeyword = /(風險|禁忌|就醫|醫師|醫療|安全|停止|不適|副作用)/.test(text);
-    const safety_block = domain === 'health' ? Boolean(safetyHeading || safetyKeyword) : true;
-
-    return { domain, action_block, safety_block };
-  }
-
-  static buildSourceAvailability(verifiedSources, minRequired, domain) {
-    const available = Array.isArray(verifiedSources) ? verifiedSources.length : 0;
-    return {
-      domain,
-      required: minRequired,
-      available,
-      passed: available >= minRequired
-    };
-  }
-
-  static computeSourceCoverage(article, verifiedSources, domain, minRequired) {
-    const sections = Array.isArray(article?.content?.sections) ? article.content.sections : [];
-    const available = Array.isArray(verifiedSources) ? verifiedSources.length : 0;
-    const coverageCount = Math.min(available, sections.length || available || 0);
-    const coverageRatio = sections.length ? coverageCount / sections.length : 1;
-    const requiredCoverage = domain === 'health'
-      ? Math.min(sections.length || 1, Math.max(minRequired, 2))
-      : Math.min(sections.length || 1, Math.max(minRequired, 1));
-
-    const passed = available >= minRequired && coverageCount >= requiredCoverage;
-
-    return {
-      domain,
-      required: minRequired,
-      available,
-      coverageCount,
-      coverageRatio,
-      requiredCoverage,
-      passed
-    };
   }
 
   static pickPeopleAlsoAskQuestions(outline, serp_data) {
@@ -717,56 +489,6 @@ class ArticleService {
     return out;
   }
 
-  static stripLinksAndUrls(html) {
-    if (!html) return html;
-    let out = String(html);
-    // Replace anchor tags with their visible text
-    out = out.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, '$1');
-    // Remove any raw URLs that may appear in text
-    out = out.replace(/https?:\/\/[^\s"'<>]+/gi, '');
-    return out;
-  }
-
-  /**
-   * Final pass: remove anchors/URLs in all article blocks and refresh plain_text.
-   */
-  static sanitizeArticleLinks(article) {
-    if (!article?.content) return article;
-
-    const sanitizeBlock = (block) => {
-      if (!block) return block;
-      const next = { ...block };
-      if (next.html) next.html = this.stripLinksAndUrls(next.html);
-      if (next.plain_text) next.plain_text = this.stripLinksAndUrls(next.plain_text);
-      if (next.html) next.plain_text = this.stripHtml(next.html);
-      return next;
-    };
-
-    const content = article.content;
-    if (content.introduction) {
-      content.introduction = sanitizeBlock(content.introduction);
-    }
-    if (Array.isArray(content.sections)) {
-      content.sections = content.sections.map((s) => sanitizeBlock(s));
-    }
-    if (content.conclusion) {
-      content.conclusion = sanitizeBlock(content.conclusion);
-    }
-    return article;
-  }
-
-  static hasUnsupportedStatClaims(html) {
-    if (!html) return false;
-    const text = this.stripHtml(String(html));
-    return /(根據\s*(?:調查|統計)|超過\s*\d+\s*%|\d+\s*%)/.test(text);
-  }
-
-  static hasListicleOrBooklistCues(html) {
-    if (!html) return false;
-    const text = this.stripHtml(String(html));
-    return /(書單|推薦|懶人包|排行榜|必看|必讀|top\s*\d+|\d+\s*本)/i.test(text);
-  }
-
   static async rewriteHtmlStrict(html, outline, options, purpose) {
     const { provider, style_guide } = options || {};
     const prompt = `你是一位極度嚴格的資深編輯。請重寫以下 HTML，使其符合規則。
@@ -789,7 +511,8 @@ ${html}
     const result = await AIService.generate(prompt, {
       provider,
       temperature: 0.2,
-      max_tokens: 1400
+      max_tokens: 1400,
+      observability_run_id: options?.observability_run_id
     });
 
     return this.stripLinksAndUrls(this.cleanMarkdownArtifacts(result.content || '').trim());
@@ -811,7 +534,8 @@ ${html}
         unique_angle,
         expected_outline,
         personal_experience,
-        brief
+        brief,
+        observability_run_id
       } = options;
 
       console.log('📝 開始生成文章...');
@@ -897,7 +621,8 @@ ${html}
         expected_outline: effectiveExpectedOutline,
         personal_experience: effectivePersonalExperience,
         brief: normalizedBrief,
-        briefBlock
+        briefBlock,
+        observability_run_id
       });
 
       const travelItinerary = contentDomain === 'travel'
@@ -920,7 +645,8 @@ ${html}
           expected_outline: effectiveExpectedOutline,
           personal_experience: effectivePersonalExperience,
           brief: normalizedBrief,
-          briefBlock
+          briefBlock,
+          observability_run_id
         });
         sections.push(sectionContent);
 
@@ -948,7 +674,8 @@ ${html}
           expected_outline: effectiveExpectedOutline,
           personal_experience: effectivePersonalExperience,
           brief: normalizedBrief,
-          briefBlock
+          briefBlock,
+          observability_run_id
         });
         sections.push(faqSection);
       }
@@ -965,7 +692,8 @@ ${html}
         unique_angle: effectiveUniqueAngle,
         personal_experience: effectivePersonalExperience,
         brief: normalizedBrief,
-        briefBlock
+        briefBlock,
+        observability_run_id
       });
 
       // 保障標題與 meta 有值，避免 undefined 注入到 HTML
@@ -1314,7 +1042,19 @@ ${html}
     // 🆕 使用 LibrarianService 獲取真實來源
     const LibrarianService = require('./librarianService');
     const verifiedSources = passedSources || await LibrarianService.getVerifiedSources(outline.title || outline.keywords?.primary);
-    const formattedSources = LibrarianService.formatSourcesForPrompt(verifiedSources);
+    // 段落生成使用「輕量來源上下文」，避免 fullContent 造成 prompt 過長導致模型輸出過短
+    const sectionSourceContext = (verifiedSources || []).slice(0, 4).map((source, index) => {
+      const fallbackText = String(source?.fullContent || source?.snippet || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 260);
+      const summary = String(source?.snippet || fallbackText || '無摘要')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 260);
+      return `[${index + 1}] ${source?.title || '未命名來源'}\n摘要: ${summary}`;
+    }).join('\n\n');
+    const formattedSources = sectionSourceContext || '無可用來源';
 
     // 用戶常見問題（來自 People Also Ask）
     const userQuestionsList = this.pickPeopleAlsoAskQuestions(outline, serp_data).slice(0, 3);
@@ -1480,7 +1220,11 @@ ${style_guide ? `8. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 
 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容。`;
 
-    const result = await AIService.generate(prompt, { provider, temperature: 0.7 });
+    const result = await AIService.generate(prompt, {
+      provider,
+      temperature: 0.7,
+      observability_run_id: options?.observability_run_id
+    });
     
     // 🆕 清理 Markdown 代碼塊標記
     let cleanedContent = this.cleanMarkdownArtifacts(result.content);
@@ -1537,7 +1281,7 @@ ${style_guide ? `8. 品牌風格：${JSON.stringify(style_guide)}` : ''}
    * 生成單一段落
    */
   static async generateSection(section, outline, options = {}) {
-    const { provider, style_guide, serp_data, internal_links, contentDomain = 'general', verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, expected_outline, personal_experience, travelItinerary, brief, briefBlock } = options;
+    const { provider, style_guide, serp_data, internal_links, contentDomain = 'general', verifiedSources: passedSources, author_bio, author_values, target_audience, unique_angle, expected_outline, personal_experience, travelItinerary, brief, briefBlock, observability_run_id } = options;
 
     // 🔧 兼容性處理：支援 title 或 heading
     const sectionHeading = section.heading || section.title || '未命名段落';
@@ -1822,14 +1566,66 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 直接輸出 HTML，不要有任何解釋文字。
 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容。`;
 
-    // 動態調整 max_tokens 根據 estimated_words
+    // 動態調整 max_tokens 根據 estimated_words（提高輸出上限，避免段落被截斷）
     const targetWords = section.estimated_words || 350;
-    const maxTokens = Math.min(Math.ceil(targetWords * 2), 2000); // 字數*2 轉為 tokens，最多2000
+    const maxTokens = Math.min(Math.ceil(targetWords * 3), 3000);
+    const minSectionChars = Math.max(160, Math.floor(targetWords * 0.45));
+    const countChineseChars = (text) => (String(text || '').match(/[\u4e00-\u9fff]/g) || []).length;
+    const hasValidH3Block = (html) => /<h3\b[^>]*>[\s\S]*?<\/h3>/i.test(String(html || ''));
+
+    const ensureSectionQuality = async (initialHtml) => {
+      let candidate = String(initialHtml || '').trim();
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const plain = this.stripHtml(candidate);
+        const chars = countChineseChars(plain);
+        if (chars >= minSectionChars && hasValidH3Block(candidate)) {
+          return candidate;
+        }
+
+        const retryProvider = attempt === 2 && provider === 'gemini' ? 'openai' : provider;
+        const reasonCode = 'SECTION_CONTENT_TOO_SHORT';
+        console.warn(`  ⚠️ 段落內容過短（${chars}字），啟動重試 #${attempt}（provider=${retryProvider}）...`);
+        ObservabilityService.recordRetry(observability_run_id, {
+          stage: `section:${sectionHeading}`,
+          reason_code: reasonCode,
+          provider: retryProvider
+        });
+
+        if (retryProvider !== provider) {
+          ObservabilityService.recordFallback(observability_run_id, {
+            from_provider: provider,
+            to_provider: retryProvider,
+            reason_code: 'SECTION_RETRY_PROVIDER_SWITCH'
+          });
+        }
+
+        const retryPrompt = `你是一位專業內容編輯。上一版「${sectionHeading}」內容過短，請完整重寫。\n\n## 段落標題（H2）\n${sectionHeading}\n\n## 要點\n${section.key_points?.join('\n- ') || '請依標題延伸重點'}\n\n## 子主題（若有）\n${subsectionsText || '請自行補足 2-3 個 H3 子主題'}\n\n## 必須遵守\n1. 只輸出 HTML，不要解釋。\n2. 至少 2 個 <h3> 子標題，每個 <h3> 後至少 1 個 <p>。\n3. 全段至少 ${minSectionChars} 字中文內容。\n4. 禁止 H1/H2、禁止 Markdown、禁止 URL 與 <a>。\n5. 務必使用台灣繁體中文。`;
+
+        const retryResult = await AIService.generate(retryPrompt, {
+          provider: retryProvider,
+          temperature: 0.5,
+          max_tokens: Math.min(Math.ceil(targetWords * 3.2), 3200),
+          observability_run_id
+        });
+
+        candidate = this.cleanMarkdownArtifacts(retryResult.content || '');
+        candidate = this.stripLinksAndUrls(candidate);
+
+        const retryH2Pattern = /^<h2[^>]*>.*?<\/h2>\s*/i;
+        if (retryH2Pattern.test(candidate)) {
+          candidate = candidate.replace(retryH2Pattern, '');
+        }
+      }
+
+      return candidate;
+    };
 
     const result = await AIService.generate(prompt, {
       provider,
       temperature: 0.6,
-      max_tokens: maxTokens
+      max_tokens: maxTokens,
+      observability_run_id
     });
 
     // 🔍 調試：查看 OpenAI 原始返回
@@ -1852,6 +1648,8 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
       console.log(`  ℹ️ 已移除段落「${sectionHeading}」的重複 h2 標題`);
     }
 
+    cleanedHtml = await ensureSectionQuality(cleanedHtml);
+
     // 🌟 Quality Assurance Loop (Two-Pass Generation)
     // 用戶明確表示願意犧牲速度換取品質，因此我們增加「自我審查與修潤」步驟
     if (draftLength > 0) {
@@ -1860,6 +1658,9 @@ ${style_guide ? `7. 品牌風格：${JSON.stringify(style_guide)}` : ''}
     } else {
       console.warn(`  ⚠️ 初稿為空，跳過修潤步驟`);
     }
+
+    // 若修潤後又變短，再做一次硬性保底
+    cleanedHtml = await ensureSectionQuality(cleanedHtml);
 
     // 🆕 Post-processing: 移除引用標記、並強制去除外部連結/URL
     cleanedHtml = LibrarianService.injectCitations(cleanedHtml, verifiedSources);
@@ -1978,7 +1779,8 @@ ${draftHtml}
       const result = await AIService.generate(prompt, {
         provider,
         temperature: 0.3, // 低溫模式，確保穩定性與精確度
-        max_tokens: maxTokens
+        max_tokens: maxTokens,
+        observability_run_id: options?.observability_run_id
       });
 
       // 🔧 清理 Markdown 標記
@@ -2087,7 +1889,8 @@ ${author_values ? `- 核心價值觀: ${author_values}` : ''}
     const result = await AIService.generate(prompt, {
       provider,
       temperature: 0.4,
-      max_tokens: 1800
+      max_tokens: 1800,
+      observability_run_id: options?.observability_run_id
     });
 
     let cleanedHtml = this.cleanMarkdownArtifacts(result.content || '').trim();
@@ -2196,7 +1999,11 @@ ${style_guide ? `8. 品牌風格：${JSON.stringify(style_guide)}` : ''}
 
 請務必使用台灣繁體中文 (Traditional Chinese) 撰寫所有內容。`;
 
-    const result = await AIService.generate(prompt, { provider, temperature: 0.7 });
+    const result = await AIService.generate(prompt, {
+      provider,
+      temperature: 0.7,
+      observability_run_id: options?.observability_run_id
+    });
 
     // 🔧 清理 Markdown 代碼塊標記
     let cleanedHtml = this.cleanMarkdownArtifacts(result.content);
@@ -2431,140 +2238,6 @@ ${userInput}
       passed: hasCaseContent,
       recommendation: hasCaseContent ? null : '建議加入具體案例或常見問題解法（提升 E-E-A-T 與 SEO 競爭力）'
     };
-  }
-
-  /**
-   * 移除 HTML 標籤
-   */
-  static stripHtml(html) {
-    if (!html) return '';
-    return html.replace(/<[^>]*>/g, '').trim();
-  }
-
-  /**
-   * 🆕 清理 AI 生成內容中的 Markdown 代碼塊標記 + [x] 佔位符
-   */
-  static cleanMarkdownArtifacts(content) {
-    if (!content) return '';
-    
-    let cleaned = content.trim();
-    
-    // 移除開頭的代碼塊標記
-    cleaned = cleaned.replace(/^```html\s*/i, '');
-    cleaned = cleaned.replace(/^```\s*/i, '');
-    
-    // 移除結尾的代碼塊標記
-    cleaned = cleaned.replace(/\s*```$/i, '');
-    
-    // 移除中間可能出現的代碼塊標記（但保留內容）
-    cleaned = cleaned.replace(/```html\s*/gi, '');
-    cleaned = cleaned.replace(/```\s*/g, '');
-    
-    // 🔧 移除或替換 [x] 佔位符
-    // 策略：將 [x] 替換為 "[參考文獻]"，更顯專業且通用
-    cleaned = cleaned.replace(/\s*\[x\]/g, ' [參考文獻]');
-    
-    // 清理過多的相同參考標記
-    cleaned = cleaned.replace(/\[參考文獻\]\s*\[參考文獻\]/g, '[參考文獻]');
-    
-    // 清理多餘空白
-    cleaned = cleaned.replace(/\s+/g, ' ').trim();
-    
-    return cleaned;
-  }
-
-  /**
-   * 🆕 判斷文章領域（根據標題關鍵字）
-   */
-  static determineDomain(title) {
-    // 安全檢查：如果 title 為 undefined 或 null，返回 general
-    if (!title || typeof title !== 'string') {
-      return 'general';
-    }
-
-    const healthKeywords = ['健康', '醫療', '睡眠', '失眠', '飲食', '營養', '運動', '疾病', '症狀', '治療'];
-    const financeKeywords = ['投資', '理財', '股票', 'ETF', '基金', '保險', '貸款', '儲蓄', '退休', '財務'];
-    const techKeywords = ['AI', '人工智慧', '科技', '軟體', '程式', '網路', '雲端', '數據', '演算法'];
-    const educationKeywords = ['學習', '教育', '課程', '培訓', '技能', '證照', '轉職', '職涯', '效率'];
-    const lifestyleKeywords = ['旅遊', '親子', '生活', '休閒', '美食', '購物', '居家', '寵物'];
-
-    if (healthKeywords.some(kw => title.includes(kw))) return 'health';
-    if (financeKeywords.some(kw => title.includes(kw))) return 'finance';
-    if (techKeywords.some(kw => title.includes(kw))) return 'tech';
-    if (educationKeywords.some(kw => title.includes(kw))) return 'education';
-    if (lifestyleKeywords.some(kw => title.includes(kw))) return 'lifestyle';
-
-    return 'general';
-  }
-
-  /**
-   * 🆕 生成領域感知的免責聲明
-   */
-  static generateDomainAwareDisclaimer(domain, usedSources = []) {
-    const disclaimers = {
-      health: {
-        title: '醫療免責聲明',
-        content: '以下資訊僅供參考，不能替代專業醫療建議、診斷或治療。如有任何健康疑慮，請務必諮詢合格的醫療專業人員。'
-      },
-      finance: {
-        title: '投資免責聲明',
-        content: '以下資訊僅供參考，不構成任何投資建議。投資有風險，過去績效不代表未來表現。在進行任何投資決策前，請諮詢合格的財務顧問。'
-      },
-      tech: {
-        title: '技術免責聲明',
-        content: '以下技術資訊僅供參考，實際應用時可能因環境差異而有所不同。在實施任何技術方案前，建議諮詢專業技術顧問。'
-      },
-      education: {
-        title: '教育免責聲明',
-        content: '以下教育與職涯資訊僅供參考，實際情況可能因個人條件與市場環境而異。建議在做出重大決定前，諮詢專業職涯顧問。'
-      },
-      lifestyle: {
-        title: '內容免責聲明',
-        content: '以下生活資訊僅供參考，實際體驗可能因個人喜好與環境而異。文中提及的產品或服務不代表本站推薦或背書。'
-      },
-      general: {
-        title: '免責聲明',
-        content: '以下資訊僅供參考，實際情況可能因個人條件與環境而異。在做出任何重大決定前，建議諮詢相關領域的專業人士。'
-      }
-    };
-
-    const disclaimer = disclaimers[domain] || disclaimers.general;
-    
-    // Avoid over-claiming specific institutions unless they were actually verified/used.
-    const safeHostFromUrl = (url) => {
-      try {
-        const u = new URL(String(url));
-        return u.hostname;
-      } catch (e) {
-        return '';
-      }
-    };
-
-    let sourcesText = '多方公開資料';
-    if (Array.isArray(usedSources) && usedSources.length > 0) {
-      const hosts = [];
-      for (const s of usedSources) {
-        const host = safeHostFromUrl(s?.url);
-        if (host) hosts.push(host);
-      }
-      const uniqueHosts = Array.from(new Set(hosts)).slice(0, 3);
-      if (uniqueHosts.length) {
-        sourcesText = `多方公開資料（包含：${uniqueHosts.join('、')}）`;
-      }
-    }
-
-    return `
-      <hr />
-      <div class="article-footer" style="background-color: #f9f9f9; padding: 20px; margin-top: 30px; border-radius: 8px;">
-        <h4>關於作者</h4>
-        <p><strong>ContentPilot 編輯團隊</strong></p>
-        <p>我們致力於提供經過整理與一致性檢查的內容。這裡的整理參考${sourcesText}，旨在為讀者提供實用且可靠的資訊。</p>
-        
-        <div class="disclaimer" style="font-size: 0.9em; color: #666; margin-top: 15px;">
-          <strong>${disclaimer.title}：</strong>${disclaimer.content}
-        </div>
-      </div>
-    `;
   }
 
   /**

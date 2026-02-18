@@ -1,5 +1,4 @@
 const { Pool } = require('pg');
-const mongoose = require('mongoose');
 const { createClient } = require('redis');
 
 const isTruthy = (value) => {
@@ -25,7 +24,10 @@ const pgPool = new Pool({
 // Redis Client
 const redisHost = process.env.REDIS_HOST || 'localhost';
 const redisPort = process.env.REDIS_PORT || 6379;
-const redisUrl = process.env.REDIS_URL || `redis://${redisHost}:${redisPort}`;
+const redisPassword = process.env.REDIS_PASSWORD || '';
+const redisUrl = process.env.REDIS_URL || (redisPassword
+  ? `redis://:${redisPassword}@${redisHost}:${redisPort}`
+  : `redis://${redisHost}:${redisPort}`);
 const redisClient = createClient({ url: redisUrl });
 
 redisClient.on('error', (err) => console.error('Redis Client Error', err));
@@ -38,19 +40,7 @@ const connectDB = async () => {
 
   const errors = [];
 
-  // 1. Connect to MongoDB (optional if URI missing)
-  if (process.env.MONGODB_URI) {
-    try {
-      await mongoose.connect(process.env.MONGODB_URI);
-      console.log('✅ MongoDB Connected');
-    } catch (error) {
-      errors.push({ name: 'MongoDB', error });
-    }
-  } else {
-    console.warn('⚠️  MONGODB_URI not set: skipping MongoDB');
-  }
-
-  // 2. Connect to PostgreSQL
+  // 1. Connect to PostgreSQL
   try {
     await pgPool.query('SELECT NOW()');
     console.log('✅ PostgreSQL Connected');
@@ -58,7 +48,7 @@ const connectDB = async () => {
     errors.push({ name: 'PostgreSQL', error });
   }
 
-  // 3. Connect to Redis
+  // 2. Connect to Redis
   try {
     await redisClient.connect();
     console.log('✅ Redis Connected');
@@ -86,6 +76,5 @@ const connectDB = async () => {
 module.exports = {
   connectDB,
   pgPool,
-  redisClient,
-  mongoose
+  redisClient
 };

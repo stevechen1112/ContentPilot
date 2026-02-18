@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/Layout';
 import ArticleGenerationPage from './pages/ArticleGenerationPage';
 import ArticleDetailPage from './pages/ArticleDetailPage';
+import ArticleListPage from './pages/ArticleListPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,7 +31,17 @@ function App() {
           
           {/* Article Detail Page - Standalone page without Layout */}
           <Route path="/article/:id" element={<ArticleDetailPage />} />
-          
+
+          {/* Article List Page */}
+          <Route
+            path="/articles"
+            element={
+              <Layout>
+                <ArticleListPage />
+              </Layout>
+            }
+          />
+
           {/* Redirect all other routes to homepage */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

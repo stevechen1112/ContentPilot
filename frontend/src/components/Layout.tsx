@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, useProjectStore, useUIStore } from '../stores';
+import NotificationBanner from './NotificationBanner';
 import {
   LayoutDashboard,
   FolderOpen,
@@ -32,9 +33,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { path: '/articles', icon: FileText, label: '文章列表' },
     { path: '/settings', icon: Settings, label: '設定' },
   ];
-
   return (
     <div className="min-h-screen bg-gray-50 flex">
+      {/* 全域通知橫幅 */}
+      <NotificationBanner />
+
       {/* Sidebar */}
       {!isSimplePage && (
         <aside

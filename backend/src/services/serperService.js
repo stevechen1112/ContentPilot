@@ -1,16 +1,44 @@
 const axios = require('axios');
+const { redisClient } = require('../config/db');
 
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 const SERPER_BASE_URL = 'https://google.serper.dev';
 
 const SERPER_TIMEOUT_MS = Number(process.env.SERPER_TIMEOUT_MS || 15000);
 const SERPER_MAX_RETRIES = Number(process.env.SERPER_MAX_RETRIES || 2);
+const SERPER_CACHE_TTL = Number(process.env.SERPER_CACHE_TTL || 86400); // 預設 24 小時
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const serperHttp = axios.create({
   timeout: SERPER_TIMEOUT_MS
 });
+
+/**
+ * Redis 快取工具：安全讀取（Redis 異常時 graceful degrade）
+ */
+async function cacheGet(key) {
+  try {
+    if (!redisClient || !redisClient.isReady) return null;
+    const cached = await redisClient.get(key);
+    return cached ? JSON.parse(cached) : null;
+  } catch (err) {
+    console.warn('Redis cache get failed (graceful degrade):', err.message);
+    return null;
+  }
+}
+
+/**
+ * Redis 快取工具：安全寫入（Redis 異常時靜默失敗）
+ */
+async function cacheSet(key, value, ttl = SERPER_CACHE_TTL) {
+  try {
+    if (!redisClient || !redisClient.isReady) return;
+    await redisClient.set(key, JSON.stringify(value), { EX: ttl });
+  } catch (err) {
+    console.warn('Redis cache set failed (graceful degrade):', err.message);
+  }
+}
 
 class SerperService {
   static clampInt(value, min, max, fallback) {
@@ -20,7 +48,7 @@ class SerperService {
   }
 
   /**
-   * 執行 Google 搜尋（SERP 分析）
+   * 執行 Google 搜尋（SERP 分析）— 支援 Redis 快取
    */
   static async search(query, options = {}) {
     try {
@@ -30,6 +58,14 @@ class SerperService {
         hl = 'zh-TW',    // 語言
         type = 'search'  // search, news, images
       } = options;
+
+      // 查詢 Redis 快取
+      const cacheKey = `serper:${type}:${gl}:${hl}:${num}:${query}`;
+      const cached = await cacheGet(cacheKey);
+      if (cached) {
+        cached._cache_hit = true;
+        return cached;
+      }
 
       const url = `${SERPER_BASE_URL}/${type}`;
       const payload = { q: query, num, gl, hl };
@@ -44,7 +80,13 @@ class SerperService {
       for (let attempt = 0; attempt <= SERPER_MAX_RETRIES; attempt++) {
         try {
           const response = await serperHttp.post(url, payload, config);
-          return response.data;
+          const data = response.data;
+
+          // 將結果寫入快取
+          await cacheSet(cacheKey, data);
+          data._cache_hit = false;
+
+          return data;
         } catch (error) {
           lastError = error;
           const status = error.response?.status;

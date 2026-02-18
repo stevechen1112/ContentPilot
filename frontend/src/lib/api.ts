@@ -30,11 +30,14 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token 過期或無效，清除並跳轉登入
-      // localStorage.removeItem('auth_token');
-      // localStorage.removeItem('user');
-      // window.location.href = '/login';
-      console.warn('API 401 Unauthorized - Ignoring in dev mode');
+      // Token 過期或無效，清除本地狀態並跳轉登入頁
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth-storage-v3');
+      window.location.href = '/login';
+    }
+    // 429 Rate Limit — 給予使用者可操作的提示
+    if (error.response?.status === 429) {
+      error.message = '請求過於頻繁，請稍後再試';
     }
     return Promise.reject(error);
   }

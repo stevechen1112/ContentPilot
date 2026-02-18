@@ -1,4 +1,4 @@
-const Keyword = require('../models/Keyword');
+const KeywordModel = require('../models/keywordModel');
 const Project = require('../models/projectModel');
 
 class KeywordController {
@@ -31,12 +31,11 @@ class KeywordController {
         });
       }
 
-      const newKeyword = await Keyword.create({
+      const newKeyword = await KeywordModel.create({
         project_id,
         keyword,
         search_volume,
-        difficulty_score,
-        user_id: userId
+        difficulty_score
       });
 
       res.status(201).json({
@@ -83,7 +82,7 @@ class KeywordController {
         });
       }
 
-      const newKeywords = await Keyword.batchCreate(project_id, keywords, userId);
+      const newKeywords = await KeywordModel.createBatch(project_id, keywords);
 
       res.status(201).json({
         success: true,
@@ -122,7 +121,7 @@ class KeywordController {
         });
       }
 
-      const keywords = await Keyword.findByProject(projectId);
+      const keywords = await KeywordModel.findByProjectId(projectId);
 
       res.json({
         success: true,
@@ -144,7 +143,7 @@ class KeywordController {
       const { id } = req.params;
       const userId = req.user.id;
 
-      const keyword = await Keyword.findById(id);
+      const keyword = await KeywordModel.findById(id);
       if (!keyword) {
         return res.status(404).json({
           success: false,
@@ -182,7 +181,7 @@ class KeywordController {
       const userId = req.user.id;
       const updateData = req.body;
 
-      const keyword = await Keyword.findById(id);
+      const keyword = await KeywordModel.findById(id);
       if (!keyword) {
         return res.status(404).json({
           success: false,
@@ -199,7 +198,7 @@ class KeywordController {
         });
       }
 
-      const updatedKeyword = await Keyword.update(id, updateData);
+      const updatedKeyword = await KeywordModel.update(id, updateData);
 
       res.json({
         success: true,
@@ -222,7 +221,7 @@ class KeywordController {
       const { id } = req.params;
       const userId = req.user.id;
 
-      const keyword = await Keyword.findById(id);
+      const keyword = await KeywordModel.findById(id);
       if (!keyword) {
         return res.status(404).json({
           success: false,
@@ -230,7 +229,7 @@ class KeywordController {
         });
       }
 
-      // 驗�?權�?
+      // 驗證權限
       const project = await Project.findById(keyword.project_id);
       if (project.user_id !== userId) {
         return res.status(403).json({
@@ -239,7 +238,7 @@ class KeywordController {
         });
       }
 
-      await Keyword.delete(id);
+      await KeywordModel.delete(id);
 
       res.json({
         success: true,

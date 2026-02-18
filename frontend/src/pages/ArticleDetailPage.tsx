@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Loader2, ArrowLeft, Printer, Sparkles, BookOpen } from 'lucide-react';
 import { articleAPI } from '../lib/api';
 import { useUIStore } from '../stores';
+import NotificationBanner from '../components/NotificationBanner';
 import ExperienceGapPanel from '../components/Article/ExperienceGapPanel';
 import ExperienceInputModal from '../components/Article/ExperienceInputModal';
 
@@ -133,6 +134,8 @@ export default function ArticleDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* 全域通知橫幅 */}
+      <NotificationBanner />
       {/* Header Toolbar */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-10 print:hidden">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">

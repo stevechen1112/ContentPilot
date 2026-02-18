@@ -4,10 +4,43 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
 const { connectDB } = require('./src/config/db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust proxy — 必要設定，系統透過 nginx 反向代理部署
+// 若不設定，req.ip 永遠是 nginx 的 IP，Rate Limiter 形同虛設
+app.set('trust proxy', 1);
+
+// ===== Rate Limiting =====
+// 全域基礎限流：同一 IP 每分鐘最多 60 次請求
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' }
+});
+
+// AI 生成嚴格限流：同一 IP 每分鐘最多 5 次
+const aiGenerationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'AI generation rate limit exceeded. Please wait before generating again.' }
+});
+
+// 研究分析限流：同一 IP 每分鐘最多 10 次
+const researchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Research API rate limit exceeded. Please try again later.' }
+});
 
 // Middleware
 app.use(helmet());
@@ -16,6 +49,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(morgan('dev'));
+app.use(globalLimiter);
 
 // Connect to Databases
 connectDB();

@@ -1,11 +1,21 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const articleController = require('../controllers/articleController');
 const { authenticateToken, optionalAuth } = require('../middleware/auth');
 
+// AI 生成嚴格限流：同一 IP 每分鐘最多 5 次
+const aiGenerationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'AI generation rate limit exceeded. Please wait before generating again.' }
+});
+
 // 大綱與文章生成 - 使用 optionalAuth 允許無需登入即可使用（POC 模式）
-router.post('/generate-outline', optionalAuth, articleController.generateOutline);
-router.post('/generate', optionalAuth, articleController.generateArticle);
+router.post('/generate-outline', aiGenerationLimiter, optionalAuth, articleController.generateOutline);
+router.post('/generate', aiGenerationLimiter, optionalAuth, articleController.generateArticle);
 
 // 其他路由需要驗證
 router.use(authenticateToken);
@@ -13,6 +23,7 @@ router.post('/generate-section-stream', articleController.generateSectionStream)
 
 // 文章管理
 router.get('/', articleController.getArticles);
+router.get('/observability/summary', articleController.getObservabilitySummary);
 router.get('/:id', articleController.getArticleById);
 router.put('/:id', articleController.updateArticle);
 router.delete('/:id', articleController.deleteArticle);

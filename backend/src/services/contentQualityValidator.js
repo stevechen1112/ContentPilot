@@ -1,14 +1,14 @@
 /**
- * 内容质量验证器 - 领域无关的通用标准
- * 适用于所有主题的文章生成
+ * 內容品質驗證器 - 領域無關的通用標準
+ * 適用於所有主題的文章生成
  */
 
 class ContentQualityValidator {
   /**
-   * 通用质量标准（适用所有领域）
+   * 通用品質標準（適用所有領域）
    */
   static QUALITY_STANDARDS = {
-    // 结构标准
+    // 結構標準
     structure: {
       minWordsPerH3: 200,
       maxWordsPerH3: 600,
@@ -16,22 +16,22 @@ class ContentQualityValidator {
       maxH3PerSection: 3
     },
 
-    // 必须包含的元素（领域无关）
+    // 必須包含的元素（領域無關）
     requiredElements: {
-      // 每个段落必须有具体内容（数字、名称、场景）
+      // 每個段落必須有具體內容（數字、名稱、場景）
       concreteDetails: {
         min: 2,
         patterns: [
-          /\d+%/,                    // 百分比数据
-          /\d+个/,                   // 数量
-          /\d+年/,                   // 时间
-          /例如|譬如|比如/,           // 举例标记
-          /步骤[一二三四五1-5]/,     // 步骤标记
-          /[A-Z][a-z]+|[A-Za-z0-9]+/ // 专有名词（英文）
+          /\d+%/,                    // 百分比數據
+          /\d+個/,                   // 數量
+          /\d+年/,                   // 時間
+          /例如|譬如|比如/,           // 舉例標記
+          /步驟[一二三四五1-5]/,     // 步驟標記
+          /[A-Z][a-z]+|[A-Za-z0-9]+/ // 專有名詞（英文）
         ]
       },
 
-      // 可执行建议（行动导向）
+      // 可執行建議（行動導向）
       actionableAdvice: {
         min: 1,
         patterns: [
@@ -41,9 +41,9 @@ class ContentQualityValidator {
         ]
       },
 
-      // 对比或比较
+      // 對比或比較
       contrastComparison: {
-        min: 0, // 不强制，但鼓励
+        min: 0, // 不強制，但鼓勵
         patterns: [
           /相比|對比|而/,
           /但|然而|不過/,
@@ -52,7 +52,7 @@ class ContentQualityValidator {
       }
     },
 
-    // 禁止的空泛用词
+    // 禁止的空泛用詞
     bannedPhrases: {
       vagueDescriptions: [
         '深入探討', '全面解析', '詳細分析',
@@ -70,13 +70,13 @@ class ContentQualityValidator {
       ]
     },
 
-    // HTML格式规范
+    // HTML 格式規範
     htmlFormat: {
       requiredTags: ['h3', 'p'],
       allowedTags: ['h3', 'p', 'ul', 'ol', 'li', 'strong', 'a'],
-      forbiddenTags: ['h1', 'h2'], // section中不应该有h2
+      forbiddenTags: ['h1', 'h2'], // section 中不應該有 h2
       attributeRules: {
-        'a': ['href', 'target', 'rel'] // a标签只允许这些属性
+        'a': ['href', 'target', 'rel'] // a 標籤只允許這些屬性
       }
     }
   };
@@ -156,59 +156,59 @@ class ContentQualityValidator {
   }
 
   /**
-   * 验证HTML格式规范
+   * 驗證 HTML 格式規範
    */
   static validateHtmlFormat(html) {
     const errors = [];
 
-    // 检查是否包含禁止的标签
+    // 檢查是否包含禁止的標籤
     this.QUALITY_STANDARDS.htmlFormat.forbiddenTags.forEach(tag => {
       const regex = new RegExp(`<${tag}[^>]*>`, 'gi');
       if (regex.test(html)) {
-        errors.push(`不应包含 <${tag}> 标签`);
+        errors.push(`不應包含 <${tag}> 標籤`);
       }
     });
 
-    // 检查是否以H2开头（section不应该重复标题）
+    // 檢查是否以 H2 開頭（section 不應該重複標題）
     if (/^\s*<h2>/i.test(html)) {
-      errors.push('内容不应以 <h2> 开头（系统会自动添加）');
+      errors.push('內容不應以 <h2> 開頭（系統會自動添加）');
     }
 
-    // 检查是否有未闭合的标签
+    // 檢查是否有未閉合的標籤
     const openTags = (html.match(/<[^/][^>]*>/g) || []).length;
     const closeTags = (html.match(/<\/[^>]+>/g) || []).length;
     if (openTags !== closeTags) {
-      errors.push('HTML标签未正确闭合');
+      errors.push('HTML 標籤未正確閉合');
     }
 
     return errors;
   }
 
   /**
-   * 计算字数（中文+英文）
+   * 計算字數（中文+英文）
    */
   static countWords(text) {
-    // 移除HTML标签
+    // 移除 HTML 標籤
     const plainText = text.replace(/<[^>]+>/g, '');
-    // 计算中文字符
+    // 計算中文字元
     const chineseChars = (plainText.match(/[\u4e00-\u9fff]/g) || []).length;
-    // 计算英文单词
+    // 計算英文單詞
     const englishWords = (plainText.match(/[a-zA-Z]+/g) || []).length;
     return chineseChars + englishWords;
   }
 
   /**
-   * 生成质量反馈报告（用于重新生成时的Prompt）
+   * 產生品質回饋報告（用於重新生成時的 Prompt）
    */
   static generateFeedback(validationResult) {
     if (validationResult.passed) {
-      return '内容质量良好';
+      return '內容品質良好';
     }
 
-    let feedback = '**上次生成的内容存在以下问题，请改进：**\n\n';
+    let feedback = '**上次生成的內容存在以下問題，請改進：**\n\n';
     
     if (validationResult.errors.length > 0) {
-      feedback += '❌ 必须修正的问题：\n';
+      feedback += '❌ 必須修正的問題：\n';
       validationResult.errors.forEach((error, i) => {
         feedback += `${i + 1}. ${error}\n`;
       });
@@ -216,37 +216,37 @@ class ContentQualityValidator {
     }
 
     if (validationResult.warnings.length > 0) {
-      feedback += '⚠️ 建议改进的地方：\n';
+      feedback += '⚠️ 建議改進的地方：\n';
       validationResult.warnings.forEach((warning, i) => {
         feedback += `${i + 1}. ${warning}\n`;
       });
       feedback += '\n';
     }
 
-    // 添加具体改进建议
-    feedback += '**改进建议：**\n';
+    // 添加具體改進建議
+    feedback += '**改進建議：**\n';
     
     if (!validationResult.stats.hasConcreteDetails) {
-      feedback += '- 添加具体的数字、百分比、案例名称或专有名词\n';
+      feedback += '- 添加具體的數字、百分比、案例名稱或專有名詞\n';
     }
     
     if (!validationResult.stats.hasActionableAdvice) {
-      feedback += '- 提供明确的操作步骤或建议（"建议..."、"可以..."、"步骤..."）\n';
+      feedback += '- 提供明確的操作步驟或建議（「建議...」、「可以...」、「步驟...」）\n';
     }
     
     if (validationResult.stats.hasBannedPhrases) {
-      feedback += '- 删除空泛描述，改用具体说明\n';
+      feedback += '- 刪除空泛描述，改用具體說明\n';
     }
 
     if (validationResult.stats.wordCount < 200) {
-      feedback += '- 扩充内容，每个H3至少200字\n';
+      feedback += '- 擴充內容，每個 H3 至少 200 字\n';
     }
 
     return feedback;
   }
 
   /**
-   * 验证引言质量
+   * 驗證引言品質
    */
   static validateIntroduction(html, plainText) {
     const errors = [];
@@ -254,25 +254,25 @@ class ContentQualityValidator {
     
     const wordCount = this.countWords(plainText);
     
-    // 引言字数检查（较宽松）
+    // 引言字數檢查（較寬鬆）
     if (wordCount < 80) {
-      errors.push(`引言过短: ${wordCount}字 (建议至少80字)`);
+      errors.push(`引言過短: ${wordCount}字 (建議至少80字)`);
     }
     
     if (wordCount > 250) {
-      warnings.push(`引言过长: ${wordCount}字 (建议不超过250字)`);
+      warnings.push(`引言過長: ${wordCount}字 (建議不超過250字)`);
     }
 
-    // 检查是否包含hook元素
+    // 檢查是否包含 hook 元素
     const hasQuestion = /[？?]/.test(plainText);
-    const hasStatistic = /\d+%|\d+个/.test(plainText);
+    const hasStatistic = /\d+%|\d+個/.test(plainText);
     const hasPainPoint = /困擾|問題|挑戰|難題/.test(plainText);
     
     if (!hasQuestion && !hasStatistic && !hasPainPoint) {
-      warnings.push('建议添加吸引读者的元素：问题、数据或痛点');
+      warnings.push('建議添加吸引讀者的元素：問題、數據或痛點');
     }
 
-    // HTML格式检查
+    // HTML 格式檢查
     const htmlErrors = this.validateHtmlFormat(html);
     errors.push(...htmlErrors);
 
@@ -285,7 +285,7 @@ class ContentQualityValidator {
   }
 
   /**
-   * 验证结论质量
+   * 驗證結論品質
    */
   static validateConclusion(html, plainText) {
     const errors = [];
@@ -294,13 +294,13 @@ class ContentQualityValidator {
     const wordCount = this.countWords(plainText);
     
     if (wordCount < 80) {
-      errors.push(`结论过短: ${wordCount}字 (建议至少80字)`);
+      errors.push(`結論過短: ${wordCount}字 (建議至少80字)`);
     }
 
-    // 检查是否有CTA
+    // 檢查是否有 CTA
     const hasCTA = /立即|開始|現在|嘗試|實踐/.test(plainText);
     if (!hasCTA) {
-      warnings.push('建议添加明确的行动呼吁（CTA）');
+      warnings.push('建議添加明確的行動呼籲（CTA）');
     }
 
     return {

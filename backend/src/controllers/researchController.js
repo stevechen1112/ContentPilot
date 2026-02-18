@@ -1,5 +1,6 @@
 const SerperService = require('../services/serperService');
 const KeywordModel = require('../models/keywordModel');
+const ProjectModel = require('../models/projectModel');
 
 class ResearchController {
   static clampInt(value, min, max, fallback) {
@@ -43,6 +44,15 @@ class ResearchController {
 
       if (!project_id || !Array.isArray(keywords) || keywords.length === 0) {
         return res.status(400).json({ error: 'Project ID and keywords array are required' });
+      }
+
+      // 檢查專案所有權
+      const project = await ProjectModel.findById(project_id);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+      if (project.user_id !== req.user.id) {
+        return res.status(403).json({ error: 'Forbidden: not your project' });
       }
 
       // 執行批量分析
@@ -126,9 +136,13 @@ class ResearchController {
         ...related.relatedSearches.map(rs => rs.query)
       ].filter(Boolean);
 
-      // 如果有 project_id，可以選擇直接儲存
+      // 如果有 project_id，驗證所有權後儲存
       let savedKeywords = [];
       if (project_id && expandedKeywords.length > 0) {
+        const project = await ProjectModel.findById(project_id);
+        if (!project || project.user_id !== req.user.id) {
+          return res.status(403).json({ error: 'Forbidden: not your project' });
+        }
         const keywordsToSave = expandedKeywords.map(kw => ({
           keyword: kw,
           priority: 'low' // 擴展的關鍵字預設為低優先級

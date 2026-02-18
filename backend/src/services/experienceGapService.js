@@ -12,14 +12,20 @@ class ExperienceGapService {
       // 提取段落
       const sections = this.extractSections(article);
 
-      // 分析每個段落的經驗空白度
+      // 並行分析各段落經驗空白度（分批，每批最多 3 個避免 API rate limit）
+      const BATCH_SIZE = 3;
       const analysisResults = [];
-      for (const section of sections) {
-        const analysis = await this.analyzeSectionExperience(section, target_keyword, provider);
-        analysisResults.push(analysis);
+      for (let i = 0; i < sections.length; i += BATCH_SIZE) {
+        const batch = sections.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(
+          batch.map(section => this.analyzeSectionExperience(section, target_keyword, provider))
+        );
+        analysisResults.push(...batchResults);
 
-        // 避免 API rate limit
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // 批次之間短暫延遲，降低 API 壓力
+        if (i + BATCH_SIZE < sections.length) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
       }
 
       // 統計資訊

@@ -1,5 +1,6 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const OpenAI = require('openai');
+const ObservabilityService = require('./observabilityService');
 
 // 懶加載 AI 客戶端（只在需要時初始化）
 let gemini = null;
@@ -22,6 +23,41 @@ function getOpenAIClient() {
 }
 
 class AIService {
+  static resolveErrorCode(error, provider = 'unknown') {
+    const rawCode = String(error?.code || '').toUpperCase();
+    const text = `${error?.message || ''} ${error?.statusText || ''}`.toUpperCase();
+
+    if (rawCode === 'AI_TIMEOUT' || text.includes('TIMEOUT')) return 'AI_TIMEOUT';
+    if (text.includes('API_KEY') || text.includes('INVALID_API_KEY') || text.includes('API KEY EXPIRED')) {
+      return `${String(provider).toUpperCase()}_AUTH_INVALID`;
+    }
+    if (text.includes('RATE LIMIT') || rawCode === '429') return `${String(provider).toUpperCase()}_RATE_LIMIT`;
+    if (text.includes('BAD REQUEST') || rawCode === '400') return `${String(provider).toUpperCase()}_BAD_REQUEST`;
+    if (text.includes('ECONN') || text.includes('NETWORK') || text.includes('FETCH')) return `${String(provider).toUpperCase()}_NETWORK_ERROR`;
+    return `${String(provider).toUpperCase()}_UNKNOWN_ERROR`;
+  }
+
+  static withTimeout(promise, timeoutMs = 180000) {
+    const safeTimeout = Math.max(1000, Number(timeoutMs) || 180000);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const timeoutError = new Error(`AI request timeout after ${safeTimeout}ms`);
+        timeoutError.code = 'AI_TIMEOUT';
+        reject(timeoutError);
+      }, safeTimeout);
+
+      promise
+        .then((result) => {
+          clearTimeout(timer);
+          resolve(result);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+  }
+
   /**
    * 呼叫 Google Gemini API
    */
@@ -32,8 +68,21 @@ class AIService {
         temperature = parseFloat(process.env.GOOGLE_GEMINI_TEMPERATURE) || 1.0,  // Gemini 3 建議使用預設值 1.0
         max_tokens = parseInt(process.env.GOOGLE_GEMINI_MAX_TOKENS) || 8192,
         system = null,
-        responseSchema = null  // 新增：支援結構化輸出
+        responseSchema = null,  // 新增：支援結構化輸出
+        timeout_ms = parseInt(process.env.AI_REQUEST_TIMEOUT_MS, 10) || 180000
       } = options;
+
+      const requestStartedAt = Date.now();
+      const runId = options.observability_run_id || null;
+
+      ObservabilityService.logEvent('ai.request.started', {
+        run_id: runId,
+        provider: 'gemini',
+        model,
+        timeout_ms,
+        max_tokens,
+        temperature
+      });
 
       const genAI = getGeminiClient();
       
@@ -55,9 +104,20 @@ class AIService {
         systemInstruction: system || undefined
       });
 
-      const result = await geminiModel.generateContent(prompt);
+      const result = await this.withTimeout(geminiModel.generateContent(prompt), timeout_ms);
       const response = result.response;
       const text = response.text();
+
+      ObservabilityService.logEvent('ai.request.succeeded', {
+        run_id: runId,
+        provider: 'gemini',
+        model,
+        latency_ms: Date.now() - requestStartedAt,
+        output_chars: String(text || '').length,
+        total_tokens: response.usageMetadata?.totalTokenCount || 0,
+        prompt_tokens: response.usageMetadata?.promptTokenCount || 0,
+        completion_tokens: response.usageMetadata?.candidatesTokenCount || 0
+      });
 
       return {
         content: text,
@@ -69,8 +129,19 @@ class AIService {
         model: model
       };
     } catch (error) {
+      const code = this.resolveErrorCode(error, 'gemini');
+      error.code = error.code || code;
+      ObservabilityService.logEvent('ai.request.failed', {
+        run_id: options.observability_run_id || null,
+        provider: 'gemini',
+        model: options.model || process.env.GOOGLE_GEMINI_MODEL || 'gemini-3-pro-preview',
+        error_code: code,
+        message: error.message
+      }, 'error');
       console.error('Google Gemini API Error:', error);
-      throw new Error(`Gemini API failed: ${error.message}`);
+      const wrapped = new Error(`Gemini API failed: ${error.message}`);
+      wrapped.code = error.code || code;
+      throw wrapped;
     }
   }
 
@@ -80,16 +151,24 @@ class AIService {
    */
   static async generate(prompt, options = {}) {
     const provider = String(options.provider || process.env.AI_PROVIDER || 'openai').toLowerCase();
+    const runId = options.observability_run_id || null;
 
     if (provider === 'gemini') {
       try {
         return await this.callGemini(prompt, options);
       } catch (error) {
+        const reasonCode = this.resolveErrorCode(error, 'gemini');
         // Best-effort fallback to OpenAI if configured.
         if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'dummy-key-not-used') {
+          ObservabilityService.recordFallback(runId, {
+            from_provider: 'gemini',
+            to_provider: 'openai',
+            reason_code: reasonCode
+          });
           console.warn(`⚠️ Gemini 失敗，改用 OpenAI：${error.message}`);
           return await this.callOpenAI(prompt, options);
         }
+        error.code = error.code || reasonCode;
         throw error;
       }
     }
@@ -107,8 +186,21 @@ class AIService {
         temperature = parseFloat(process.env.OPENAI_TEMPERATURE) || 0.7,
         max_tokens = parseInt(process.env.OPENAI_MAX_TOKENS) || 4096,
         system = null,
-        response_format = null
+        response_format = null,
+        timeout_ms = parseInt(process.env.AI_REQUEST_TIMEOUT_MS, 10) || 180000
       } = options;
+
+      const requestStartedAt = Date.now();
+      const runId = options.observability_run_id || null;
+
+      ObservabilityService.logEvent('ai.request.started', {
+        run_id: runId,
+        provider: 'openai',
+        model,
+        timeout_ms,
+        max_tokens,
+        temperature
+      });
 
       const client = getOpenAIClient();
 
@@ -144,10 +236,22 @@ class AIService {
         requestParams.temperature = temperature;
       }
 
-      const response = await client.chat.completions.create(requestParams);
+      const response = await this.withTimeout(client.chat.completions.create(requestParams), timeout_ms);
+      const output = response.choices[0].message.content;
+
+      ObservabilityService.logEvent('ai.request.succeeded', {
+        run_id: runId,
+        provider: 'openai',
+        model,
+        latency_ms: Date.now() - requestStartedAt,
+        output_chars: String(output || '').length,
+        total_tokens: response.usage?.total_tokens || 0,
+        prompt_tokens: response.usage?.prompt_tokens || 0,
+        completion_tokens: response.usage?.completion_tokens || 0
+      });
 
       return {
-        content: response.choices[0].message.content,
+        content: output,
         usage: {
           prompt_tokens: response.usage.prompt_tokens,
           completion_tokens: response.usage.completion_tokens,
@@ -156,8 +260,19 @@ class AIService {
         model: model
       };
     } catch (error) {
+      const code = this.resolveErrorCode(error, 'openai');
+      error.code = error.code || code;
+      ObservabilityService.logEvent('ai.request.failed', {
+        run_id: options.observability_run_id || null,
+        provider: 'openai',
+        model: options.model || process.env.OPENAI_MODEL || 'gpt-5-mini',
+        error_code: code,
+        message: error.message
+      }, 'error');
       console.error('OpenAI API Error:', error);
-      throw new Error(`OpenAI API failed: ${error.message}`);
+      const wrapped = new Error(`OpenAI API failed: ${error.message}`);
+      wrapped.code = error.code || code;
+      throw wrapped;
     }
   }
 

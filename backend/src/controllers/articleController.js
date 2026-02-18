@@ -5,6 +5,7 @@ const OutlineService = require('../services/outlineService');
 const ArticleService = require('../services/articleService');
 const QualityService = require('../services/qualityService');
 const ExperienceGapService = require('../services/experienceGapService');
+const ObservabilityService = require('../services/observabilityService');
 const {
   normalizeContentBrief,
   validateContentBriefRequiredFields
@@ -16,6 +17,7 @@ class ArticleController {
    * POST /api/articles/generate-outline
    */
   static async generateOutline(req, res) {
+    let runId = null;
     try {
       const {
         keyword,
@@ -33,8 +35,16 @@ class ArticleController {
         brief_strict
       } = req.body;
 
+      runId = ObservabilityService.startRun({
+        pipeline: 'outline_generation',
+        provider: provider || process.env.AI_PROVIDER || 'openai',
+        meta: { has_brief: Boolean(brief), keyword: String(keyword || '').slice(0, 80) }
+      });
+
       if (!keyword) {
-        return res.status(400).json({ error: 'Keyword is required' });
+        const errorCode = 'INVALID_INPUT';
+        ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
+        return res.status(400).json({ error: 'Keyword is required', code: errorCode, request_id: runId });
       }
 
       // Brief preflight validation (per backend/docs/CONTENT_CONFIG_SCHEMA.md)
@@ -59,9 +69,13 @@ class ArticleController {
 
         const missing = validateContentBriefRequiredFields(normalizedNoDefaults, { keyword });
         if (missing.length && brief_strict === true) {
+          const errorCode = 'BRIEF_VALIDATION_FAILED';
+          ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
           return res.status(400).json({
             error: 'Brief missing required fields',
-            missing
+            missing,
+            code: errorCode,
+            request_id: runId
           });
         }
 
@@ -86,6 +100,7 @@ class ArticleController {
         const project = await ProjectModel.findById(project_id);
       }
 
+      const stageStartedAt = Date.now();
       const outline = await OutlineService.generateOutline(keyword, {
         serp_data,
         tone,
@@ -98,14 +113,31 @@ class ArticleController {
         brief: effectiveBrief,
         provider
       });
+      ObservabilityService.recordStage(runId, {
+        stage: 'outline.generate',
+        status: 'ok',
+        duration_ms: Date.now() - stageStartedAt
+      });
+
+      ObservabilityService.finishRun(runId, { success: true });
 
       res.json({
         message: 'Outline generated successfully',
+        request_id: runId,
         data: outline
       });
     } catch (error) {
       console.error('Generate outline error:', error);
-      res.status(500).json({ error: 'Failed to generate outline' });
+      const errorCode = ArticleController.normalizeErrorCode(error);
+      if (runId) {
+        ObservabilityService.recordStage(runId, {
+          stage: 'outline.generate',
+          status: 'error',
+          error_code: errorCode
+        });
+        ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
+      }
+      res.status(500).json({ error: 'Failed to generate outline', code: errorCode, request_id: runId });
     }
   }
 
@@ -114,6 +146,7 @@ class ArticleController {
    * POST /api/articles/generate
    */
   static async generateArticle(req, res) {
+    let runId = null;
     try {
       let {
         project_id,
@@ -133,10 +166,18 @@ class ArticleController {
         enable_reader_evaluation
       } = req.body;
 
+      runId = ObservabilityService.startRun({
+        pipeline: 'article_generation',
+        provider: provider || process.env.AI_PROVIDER || 'openai',
+        meta: { has_brief: Boolean(brief), has_outline: Boolean(outline), project_id: project_id || null }
+      });
+
       const skipDb = String(process.env.SKIP_DB || '').trim().toLowerCase() === 'true';
 
       if (!outline) {
-        return res.status(400).json({ error: 'Outline is required' });
+        const errorCode = 'INVALID_INPUT';
+        ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
+        return res.status(400).json({ error: 'Outline is required', code: errorCode, request_id: runId });
       }
 
       // Brief preflight validation (per backend/docs/CONTENT_CONFIG_SCHEMA.md)
@@ -161,9 +202,13 @@ class ArticleController {
           keyword: outline?.keywords?.primary || outline?.title
         });
         if (missing.length && brief_strict === true) {
+          const errorCode = 'BRIEF_VALIDATION_FAILED';
+          ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
           return res.status(400).json({
             error: 'Brief missing required fields',
-            missing
+            missing,
+            code: errorCode,
+            request_id: runId
           });
         }
 
@@ -185,6 +230,7 @@ class ArticleController {
 
       // POC/Local mode: allow generation without database persistence
       if (skipDb) {
+        const stageStartedAt = Date.now();
         const article = await ArticleService.generateArticle(outline, {
           serp_data,
           style_guide: tone ? { tone } : undefined,
@@ -196,13 +242,25 @@ class ArticleController {
           personal_experience,
           brief: effectiveBrief,
           provider,
-          enable_reader_evaluation
+          enable_reader_evaluation,
+          observability_run_id: runId
+        });
+        ObservabilityService.recordStage(runId, {
+          stage: 'article.generate',
+          status: 'ok',
+          duration_ms: Date.now() - stageStartedAt
         });
 
         const cleanArticle = JSON.parse(JSON.stringify(article).replace(/\\u0000/g, ''));
 
+        ObservabilityService.finishRun(runId, {
+          success: true,
+          quality_score: ArticleController.extractQualityScore(cleanArticle)
+        });
+
         return res.json({
           message: 'Article generated successfully (SKIP_DB=true, not persisted)',
+          request_id: runId,
           data: {
             article_id: 'local-preview',
             project_id: project_id || 'local-preview',
@@ -257,7 +315,12 @@ class ArticleController {
         personal_experience,
         brief: effectiveBrief,
         provider,
-        enable_reader_evaluation
+        enable_reader_evaluation,
+        observability_run_id: runId
+      });
+      ObservabilityService.recordStage(runId, {
+        stage: 'article.generate',
+        status: 'ok'
       });
 
       // 清理 PostgreSQL 不支援的 null 字符 (\u0000)
@@ -271,6 +334,10 @@ class ArticleController {
         keyword_id,
         title: cleanArticle.title,
         content_draft: cleanArticle,
+      });
+      ObservabilityService.recordStage(runId, {
+        stage: 'article.persist',
+        status: 'ok'
       });
 
       // Helper to ensure content is object
@@ -288,8 +355,14 @@ class ArticleController {
 
       const safeContent = ensureObject(savedArticle.content_draft);
 
+      ObservabilityService.finishRun(runId, {
+        success: true,
+        quality_score: ArticleController.extractQualityScore(safeContent)
+      });
+
       res.json({
         message: 'Article generated successfully',
+        request_id: runId,
         data: {
           article_id: savedArticle.id,
           ...savedArticle,
@@ -300,7 +373,37 @@ class ArticleController {
       });
     } catch (error) {
       console.error('Generate article error:', error);
-      res.status(500).json({ error: 'Failed to generate article' });
+      const errorCode = ArticleController.normalizeErrorCode(error);
+      if (runId) {
+        ObservabilityService.recordStage(runId, {
+          stage: 'article.generate',
+          status: 'error',
+          error_code: errorCode
+        });
+        ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
+      }
+      res.status(500).json({ error: 'Failed to generate article', code: errorCode, request_id: runId });
+    }
+  }
+
+  /**
+   * 系統級觀測指標
+   * GET /api/articles/observability/summary
+   */
+  static async getObservabilitySummary(req, res) {
+    try {
+      const windowMinutes = Number(req.query.window_minutes || 60);
+      const summary = ObservabilityService.getSummary({ window_minutes: windowMinutes });
+      res.json({
+        message: 'Observability summary retrieved successfully',
+        data: summary
+      });
+    } catch (error) {
+      console.error('Get observability summary error:', error);
+      res.status(500).json({
+        error: 'Failed to retrieve observability summary',
+        code: ArticleController.normalizeErrorCode(error)
+      });
     }
   }
 
@@ -561,8 +664,11 @@ class ArticleController {
         return res.status(400).json({ error: 'Project ID is required' });
       }
 
-      // 驗證權限
+      // 驗證權限：確認專案屬於當前使用者
       const project = await ProjectModel.findById(project_id);
+      if (!project || project.user_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. You do not own this project.' });
+      }
 
       const articles = await ArticleModel.findByProjectId(project_id, { status });
       const statistics = await ArticleModel.getStatsByProject(project_id);
@@ -591,8 +697,11 @@ class ArticleController {
         return res.status(404).json({ error: 'Article not found' });
       }
 
-      // 驗證權限
+      // 驗證權限：確認文章所屬專案是當前使用者的
       const project = await ProjectModel.findById(article.project_id);
+      if (!project || project.user_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. You do not own this article.' });
+      }
 
       const ensureObject = (data) => {
         if (typeof data === 'string') {
@@ -631,8 +740,11 @@ class ArticleController {
         return res.status(404).json({ error: 'Article not found' });
       }
 
-      // 驗證權限
+      // 驗證權限：確認文章所屬專案是當前使用者的
       const project = await ProjectModel.findById(article.project_id);
+      if (!project || project.user_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. You do not own this article.' });
+      }
 
       const updatedArticle = await ArticleModel.update(id, updates);
 
@@ -659,8 +771,11 @@ class ArticleController {
         return res.status(404).json({ error: 'Article not found' });
       }
 
-      // 驗證權限
+      // 驗證權限：確認文章所屬專案是當前使用者的
       const project = await ProjectModel.findById(article.project_id);
+      if (!project || project.user_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. You do not own this article.' });
+      }
 
       await ArticleModel.delete(id);
 
@@ -671,6 +786,33 @@ class ArticleController {
       console.error('Delete article error:', error);
       res.status(500).json({ error: 'Failed to delete article' });
     }
+  }
+
+  static normalizeErrorCode(error) {
+    const rawCode = String(error?.code || '').toUpperCase();
+    if (rawCode) return rawCode;
+
+    const message = String(error?.message || '').toUpperCase();
+    if (message.includes('TIMEOUT')) return 'AI_TIMEOUT';
+    if (message.includes('API KEY')) return 'AI_AUTH_INVALID';
+    if (message.includes('RATE LIMIT')) return 'AI_RATE_LIMIT';
+    if (message.includes('BRIEF')) return 'BRIEF_VALIDATION_FAILED';
+    return 'GENERATION_PIPELINE_FAILED';
+  }
+
+  static extractQualityScore(articleContent) {
+    const scoreCandidates = [
+      articleContent?.quality_report?.overall_score,
+      articleContent?.quality_report?.checks?.reader_evaluation?.score,
+      articleContent?.quality_report?.reader_evaluation?.overall_score,
+      articleContent?.metadata?.quality_score
+    ];
+
+    for (const score of scoreCandidates) {
+      const numeric = Number(score);
+      if (Number.isFinite(numeric)) return numeric;
+    }
+    return null;
   }
 }
 

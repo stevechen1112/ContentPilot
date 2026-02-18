@@ -88,7 +88,9 @@ export default function ArticleGenerationPage() {
       } catch (error: any) {
         console.error('Failed to initialize project:', error);
         if (error.response?.status === 401 || error.status === 401) {
-          console.error('Authentication check failed. User might need to login.');
+          setNotification({ type: 'error', message: '登入已過期，請重新登入' });
+        } else {
+          setNotification({ type: 'error', message: '專案初始化失敗，請重新整理頁面' });
         }
       } finally {
         setInitializing(false);

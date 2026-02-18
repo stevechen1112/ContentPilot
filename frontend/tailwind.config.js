@@ -20,6 +20,15 @@ export default {
           900: '#0c4a6e',
         },
       },
+      keyframes: {
+        'slide-down': {
+          '0%': { opacity: '0', transform: 'translate(-50%, -1rem)' },
+          '100%': { opacity: '1', transform: 'translate(-50%, 0)' },
+        },
+      },
+      animation: {
+        'slide-down': 'slide-down 0.3s ease-out',
+      },
     },
   },
   plugins: [],
