@@ -37,19 +37,21 @@
 
 本系統依據 [完整開發計畫](SEO%20自動化內容生產系統完整開發計.md) 實作，包含以下核心模組：
 
-- **S0 專案管理層**：React 前端專案管理介面。
+- **S0 專案管理層**：React 前端專案管理介面，支援多專案。
 - **S1 內容策劃輸入**：圖形化 Brief 設定 (Persona, Tone, Unique Angle)。
-- **S2 智能資訊採集**：整合 Serper.dev 進行即時 SERP 分析。
+- **S2 智能資訊採集**：整合 Serper.dev 進行即時 SERP 分析，結果 Redis 快取 24 小時。
 - **S4 內容大綱生成**：基於競爭者分析的結構化大綱。
-- **S5 AI 寫作引擎**：支援 Gemini/OpenAI/Claude 的多模型生成。
+- **S5 AI 寫作引擎**：支援 Gemini/OpenAI/Claude 的多模型生成，含自動 retry/fallback。
 - **S6 品質檢核**：Schema 驗證、來源計數、讀者評分。
+- **S7 文章列表**：統計儀表板 (總篇數/平均品質/E-E-A-T/SEO 分)、搜尋篩選與刪除。
 - **S8 智能二修工作台**：經驗缺口偵測與互動式修訂。
 
 ## 🚀 快速開始
 
 ### 前置需求
-- Node.js 18+
+- Node.js 20+
 - PostgreSQL (透過 Docker)
+- Redis (透過 Docker，用於 SERP 快取)
 - API Keys (Gemini/OpenAI, Serper.dev)
 
 ### 安裝步驟
@@ -84,19 +86,37 @@
    ```
    介面運行於: `http://localhost:5173`
 
+6. **執行後端單元測試**
+   ```bash
+   cd backend
+   npm test
+   ```
+   Jest 測試套件涵蓋 `articleService` 核心純函式 (23 個測試案例)
+
+## � CI/CD
+
+- **GitHub Actions** 自動化測試：每次 push 至 `main`/`develop` 分支時觸發。
+- 測試矩陣：Node.js 20.x 與 22.x 雙版本並行。
+- 部署流程：`git reset --hard origin/master` → `npm install` → `npm test` → `npm run build` → `pm2 restart`。
+
 ## 📚 相關文件
 
-- [完整開發計畫](SEO%20自動化內容生產系統完整開發計.md)
+- [完整開發計畫](docs/SEO%20自動化內容生產系統完整開發計.md)
+- [最佳化計畫](OPTIMIZATION_PLAN.md)
 - [內容設定 Schema 規範](backend/docs/CONTENT_CONFIG_SCHEMA.md)
 - [讀者評估 Prompt 設計](backend/docs/CONTENT_EVALUATION_PROMPT.md)
 - [內容評量標準](backend/docs/CONTENT_EVALUATION_STANDARDS.md)
+- [部署說明](DEPLOYMENT.md)
 
 ## 🛠️ 技術棧
 
-- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Zustand
-- **Backend**: Node.js, Express, PostgreSQL, Redis
-- **AI Models**: Google Gemini Pro (Default), OpenAI GPT-4o, Claude 3.5 Sonnet
-- **Tools**: Docker, Cheerio, Puppeteer
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Zustand, TanStack Query, Headless UI
+- **Backend**: Node.js 20+, Express, PostgreSQL, Redis
+- **AI Models**: Google Gemini (Default), OpenAI GPT-4o-mini (Fallback)
+- **Auth**: JWT (HS256)，Bearer Token，auth-storage-v3
+- **Testing**: Jest 30，23 unit tests，GitHub Actions CI (Node 20.x / 22.x matrix)
+- **Observability**: 結構化 JSON 日誌，pipeline 事件追蹤，retry/fallback 計數
+- **Tools**: Docker, PM2, Cheerio, Paramiko (E2E 測試腳本)
 
 ---
 © 2025 SEO ContentForge Team. All Rights Reserved.
