@@ -208,7 +208,7 @@ function generateDomainAwareDisclaimer(domain, usedSources = [], options = {}) {
 
   return `
       <hr />
-      <div class="article-footer" style="background-color: #f9f9f9; padding: 20px; margin-top: 30px; border-radius: 8px;">
+      <div class="article-footer authority-ledger" data-preserve-footer="authority-ledger" style="background-color: #f9f9f9; padding: 20px; margin-top: 30px; border-radius: 8px;">
         ${authorBlock}
         <p>我們致力於提供經過整理與一致性檢查的內容。這裡的整理參考${sourcesText}，旨在為讀者提供實用且可靠的資訊。</p>
         ${ledgerBlock}

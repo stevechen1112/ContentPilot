@@ -98,7 +98,7 @@ function stripTemplateFooters(article) {
   const cleanHtml = (html) => {
     if (!html) return html;
     let out = String(html);
-    out = out.replace(/<div class="article-footer"[\s\S]*?<\/div>/gi, '');
+    out = out.replace(/<div class="article-footer"(?![^\"]*authority-ledger)[\s\S]*?<\/div>/gi, '');
     out = out.replace(/<hr\s*\/>\s*$/gi, '').trim();
     return out;
   };
