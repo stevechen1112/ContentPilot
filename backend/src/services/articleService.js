@@ -71,7 +71,7 @@ class ArticleService {
   static computeSourceCoverage(article, v, domain, min) { return _computeSourceCoverage(article, v, domain, min); }
   static evaluateActionSafety(article, domain) { return _evaluateActionSafety(article, domain); }
   static determineDomain(title) { return _determineDomain(title); }
-  static generateDomainAwareDisclaimer(domain, usedSources = []) { return _generateDomainAwareDisclaimer(domain, usedSources); }
+  static generateDomainAwareDisclaimer(domain, usedSources = [], options = {}) { return _generateDomainAwareDisclaimer(domain, usedSources, options); }
 
   // ── Quality summary helpers (non-extracted) ───────────────────────────────
   static recomputeQualitySummary(report) {
@@ -754,7 +754,11 @@ ${html}
       // 🆕 P1優化：增強 E-E-A-T (添加領域感知的作者簡介與免責聲明)
       if (fullArticle.content?.conclusion?.html) {
         const domain = this.determineDomain(outline.title);
-        const disclaimer = this.generateDomainAwareDisclaimer(domain, verifiedSources || []);
+        const disclaimer = this.generateDomainAwareDisclaimer(domain, verifiedSources || [], {
+          authorBio: effectiveAuthorBio,
+          authorValues: effectiveAuthorValues,
+          keyword: primaryKeyword,
+        });
         
         fullArticle.content.conclusion.html += disclaimer;
         fullArticle.content.conclusion.plain_text += this.stripHtml(disclaimer);
@@ -2379,8 +2383,51 @@ ${target_keyword}
     return out;
   }
 
+  static normalizeKeywordForMatch(text = '') {
+    return String(text || '').replace(/\s+/g, '').trim();
+  }
+
+  static countKeywordInText(text = '', keyword = '') {
+    const normalizedText = this.normalizeKeywordForMatch(this.stripHtml(String(text || '')));
+    const normalizedKeyword = this.normalizeKeywordForMatch(keyword);
+    if (!normalizedText || !normalizedKeyword) return 0;
+    const escaped = normalizedKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(escaped, 'g');
+    return (normalizedText.match(pattern) || []).length;
+  }
+
+  static deriveCoreKeyword(keyword = '') {
+    let core = String(keyword || '').trim();
+    core = core.replace(/^\d{4}\s*/u, '');
+    core = core
+      .replace(/(全攻略|懶人包|完整指南|指南|攻略|推薦|教學|入門)$/u, '')
+      .trim();
+    return core || String(keyword || '').trim();
+  }
+
+  static calculateKeywordTargets(totalChars = 0) {
+    const chars = Number(totalChars) || 0;
+    const exactTarget = Math.min(8, Math.max(3, Math.round(chars * 0.0012)));
+    const coreTarget = Math.min(20, Math.max(8, Math.round(chars * 0.0035)));
+    return { exactTarget, coreTarget };
+  }
+
+  static appendSentenceToPart(part, sentence) {
+    if (!part || !sentence) return;
+    part.html = (part.html || '') + sentence;
+    part.plain_text = (part.plain_text || '') + this.stripHtml(sentence);
+  }
+
+  static buildArticlePlainText(article) {
+    if (!article?.content) return '';
+    const intro = article.content.introduction?.plain_text || article.content.introduction?.html || '';
+    const sections = (article.content.sections || []).map((s) => s?.plain_text || s?.html || '').join('\n');
+    const conclusion = article.content.conclusion?.plain_text || article.content.conclusion?.html || '';
+    return this.stripHtml([intro, sections, conclusion].join('\n'));
+  }
+
   /**
-   * 確保目標關鍵字至少自然出現 2 次；若不足，於結論補充一句
+   * P0：關鍵字密度補強（可控、位置固定、避免機械堆砌）
    */
   static ensureKeywordPresence(article, keyword) {
     const safeKeyword = String(keyword || '').trim();
@@ -2393,20 +2440,69 @@ ${target_keyword}
       // 若序列化失敗，略過不阻塞流程
     }
 
-    const escaped = safeKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(escaped, 'g');
-    const contentText = JSON.stringify(article);
-    const count = (contentText.match(pattern) || []).length;
+    const plainText = this.buildArticlePlainText(article);
+    const totalChars = this.normalizeKeywordForMatch(plainText).length;
+    const coreKeyword = this.deriveCoreKeyword(safeKeyword);
 
-    if (count >= 2) return article;
+    let exactCount = this.countKeywordInText(plainText, safeKeyword);
+    let coreCount = this.countKeywordInText(plainText, coreKeyword);
 
-    // 只補一個中性句，避免跨領域的錯誤情境（例如台北出發/親子低碳）污染內容。
-    const sentence = `<p>本指南聚焦「${safeKeyword}」，整理可直接採用的重點與步驟，方便快速上手。</p>`;
+    const { exactTarget, coreTarget } = this.calculateKeywordTargets(totalChars);
 
-    if (article.content?.conclusion) {
-      article.content.conclusion.html = (article.content.conclusion.html || '') + sentence;
-      article.content.conclusion.plain_text = (article.content.conclusion.plain_text || '') + this.stripHtml(sentence);
+    console.log(`📌 [P0密度補強] keyword=${safeKeyword}`);
+    console.log(`   - 當前: exact=${exactCount}, core=${coreCount}, chars=${totalChars}`);
+    console.log(`   - 目標: exact>=${exactTarget}, core>=${coreTarget}`);
+
+    if (exactCount >= exactTarget && coreCount >= coreTarget) {
+      return article;
     }
+
+    const slots = [];
+    if (article.content?.introduction) slots.push(article.content.introduction);
+    if (Array.isArray(article.content?.sections) && article.content.sections[0]) slots.push(article.content.sections[0]);
+    if (Array.isArray(article.content?.sections) && article.content.sections[1]) slots.push(article.content.sections[1]);
+    if (article.content?.conclusion) slots.push(article.content.conclusion);
+
+    const exactSentences = [
+      `<p>這篇內容以「${safeKeyword}」為核心，整理可直接執行的判斷重點與步驟。</p>`,
+      `<p>若你正在搜尋「${safeKeyword}」，可先依本文的優先順序逐項檢查與調整。</p>`
+    ];
+    const coreSentences = [
+      `<p>你可以先掌握${coreKeyword}的核心原則，再依自身情境做小幅度調整。</p>`,
+      `<p>實務上，${coreKeyword}最重要的是先做基礎盤點，再逐步優化細節。</p>`
+    ];
+
+    let exactIdx = 0;
+    let coreIdx = 0;
+    let slotIdx = 0;
+    let inserted = 0;
+
+    while (slotIdx < slots.length && inserted < 6 && (exactCount < exactTarget || coreCount < coreTarget)) {
+      const slot = slots[slotIdx];
+      let sentence = '';
+
+      if (exactCount < exactTarget) {
+        sentence = exactSentences[exactIdx % exactSentences.length];
+        exactIdx += 1;
+      } else if (coreCount < coreTarget) {
+        sentence = coreSentences[coreIdx % coreSentences.length];
+        coreIdx += 1;
+      }
+
+      if (!sentence) break;
+
+      this.appendSentenceToPart(slot, sentence);
+      inserted += 1;
+      slotIdx += 1;
+
+      exactCount += this.countKeywordInText(sentence, safeKeyword);
+      coreCount += this.countKeywordInText(sentence, coreKeyword);
+    }
+
+    const refreshedText = this.buildArticlePlainText(article);
+    const finalExact = this.countKeywordInText(refreshedText, safeKeyword);
+    const finalCore = this.countKeywordInText(refreshedText, coreKeyword);
+    console.log(`   - 補強後: exact=${finalExact}, core=${finalCore}, inserted=${inserted}`);
 
     return article;
   }

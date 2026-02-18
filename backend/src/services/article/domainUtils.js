@@ -152,7 +152,7 @@ function determineDomain(title) {
  * @param {any[]} usedSources
  * @returns {string}
  */
-function generateDomainAwareDisclaimer(domain, usedSources = []) {
+function generateDomainAwareDisclaimer(domain, usedSources = [], options = {}) {
   const disclaimers = {
     health: { title: '醫療免責聲明', content: '以下資訊僅供參考，不能替代專業醫療建議、診斷或治療。如有任何健康疑慮，請務必諮詢合格的醫療專業人員。' },
     finance: { title: '投資免責聲明', content: '以下資訊僅供參考，不構成任何投資建議。投資有風險，過去績效不代表未來表現。在進行任何投資決策前，請諮詢合格的財務顧問。' },
@@ -162,6 +162,9 @@ function generateDomainAwareDisclaimer(domain, usedSources = []) {
     general: { title: '免責聲明', content: '以下資訊僅供參考，實際情況可能因個人條件與環境而異。在做出任何重大決定前，建議諮詢相關領域的專業人士。' },
   };
   const disclaimer = disclaimers[domain] || disclaimers.general;
+  const authorBio = String(options?.authorBio || '').trim();
+  const authorValues = String(options?.authorValues || '').trim();
+  const keyword = String(options?.keyword || '').trim();
   const safeHost = (url) => { try { return new URL(String(url)).hostname; } catch { return ''; } };
   let sourcesText = '多方公開資料';
   if (Array.isArray(usedSources) && usedSources.length > 0) {
@@ -169,12 +172,46 @@ function generateDomainAwareDisclaimer(domain, usedSources = []) {
     const unique = [...new Set(hosts)].slice(0, 3);
     if (unique.length) sourcesText = `多方公開資料（包含：${unique.join('、')}）`;
   }
+
+  const sourceItems = Array.isArray(usedSources)
+    ? usedSources.slice(0, 5).map((source, idx) => {
+      const institution = source?.institutionName || source?.publisher || source?.title || '權威機構';
+      const topic = source?.title || source?.query || keyword || '相關主題';
+      const year = String(source?.publishedAt || '').match(/\d{4}/)?.[0] || '';
+      return `<li>${idx + 1}. <strong>${institution}</strong>${year ? `（${year}）` : ''}：${String(topic).slice(0, 80)}</li>`;
+    })
+    : [];
+
+  const authorBlock = authorBio
+    ? `
+        <h4>作者與審校資訊</h4>
+        <p><strong>${authorBio}</strong></p>
+        ${authorValues ? `<p>內容原則：${authorValues}</p>` : ''}
+      `
+    : `
+        <h4>作者與審校資訊</h4>
+        <p><strong>ContentPilot 編輯團隊</strong></p>
+        <p>內容由編輯流程與一致性規則審校後發布。</p>
+      `;
+
+  const ledgerBlock = sourceItems.length > 0
+    ? `
+        <h4>來源依據（機構與主題對照）</h4>
+        <ul>
+          ${sourceItems.join('')}
+        </ul>
+      `
+    : `
+        <h4>來源依據</h4>
+        <p>本文未引用可公開列示的機構來源，建議讀者交叉查證後再採納。</p>
+      `;
+
   return `
       <hr />
       <div class="article-footer" style="background-color: #f9f9f9; padding: 20px; margin-top: 30px; border-radius: 8px;">
-        <h4>關於作者</h4>
-        <p><strong>ContentPilot 編輯團隊</strong></p>
+        ${authorBlock}
         <p>我們致力於提供經過整理與一致性檢查的內容。這裡的整理參考${sourcesText}，旨在為讀者提供實用且可靠的資訊。</p>
+        ${ledgerBlock}
         <div class="disclaimer" style="font-size: 0.9em; color: #666; margin-top: 15px;">
           <strong>${disclaimer.title}：</strong>${disclaimer.content}
         </div>
