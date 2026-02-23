@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const researchController = require('../controllers/researchController');
-const { authenticateToken } = require('../middleware/auth');
+const { optionalAuth } = require('../middleware/auth');
 
 // 研究分析限流：同一 IP 每分鐘最多 10 次
 const researchLimiter = rateLimit({
@@ -13,8 +13,8 @@ const researchLimiter = rateLimit({
   message: { error: 'Research API rate limit exceeded. Please try again later.' }
 });
 
-// 所有 research routes 都需要驗證
-router.use(authenticateToken);
+// research routes 使用 optionalAuth：有登入就帶入用戶資訊，無登入也允許（rate limit 保護）
+router.use(optionalAuth);
 
 // SERP 分析
 router.post('/analyze-keyword', researchLimiter, researchController.analyzeKeyword);

@@ -25,15 +25,31 @@ apiClient.interceptors.request.use(
   }
 );
 
+// 解碼 JWT payload（不驗簽，僅取 exp）
+function getTokenExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Response 攔截器：處理錯誤
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token 過期或無效，清除本地狀態並跳轉登入頁
+      // Token 過期或無效：清除本地狀態，再跳轉登入頁
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth-storage-v3');
-      window.location.href = '/login';
+      // 用 setTimeout 讓當前 catch 有機會先執行（例如 SERP 失敗可繼續）
+      // 但因為這是真正的 auth 失敗，仍需導向登入
+      setTimeout(() => {
+        if (!localStorage.getItem('auth_token')) {
+          window.location.href = '/login';
+        }
+      }, 100);
     }
     // 429 Rate Limit — 給予使用者可操作的提示
     if (error.response?.status === 429) {
@@ -42,6 +58,19 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// 主動偵測 token 是否即將過期（每 5 分鐘檢查一次）
+setInterval(() => {
+  const token = localStorage.getItem('auth_token');
+  if (!token) return;
+  const exp = getTokenExpiry(token);
+  if (exp && Date.now() / 1000 > exp) {
+    // Token 已過期，清除並跳轉
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth-storage-v3');
+    window.location.href = '/login';
+  }
+}, 5 * 60 * 1000);
 
 // ==================== Auth API ====================
 export const authAPI = {
