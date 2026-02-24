@@ -95,9 +95,28 @@ class ArticleController {
         );
       }
 
-      // 如果有 project_id，驗證權限（POC 模式跳過）
-      if (project_id && req.user) {
+      // 如果有 project_id，驗證權限（避免匿名或錯誤專案 ID 造成不一致）
+      if (project_id) {
+        if (!req.user) {
+          const errorCode = 'AUTH_REQUIRED_FOR_PROJECT';
+          ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
+          return res.status(401).json({
+            error: 'Login required when project_id is provided',
+            code: errorCode,
+            request_id: runId
+          });
+        }
+
         const project = await ProjectModel.findById(project_id);
+        if (!project || project.user_id !== req.user.id) {
+          const errorCode = 'PROJECT_ACCESS_DENIED';
+          ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
+          return res.status(403).json({
+            error: 'Access denied. You do not own this project.',
+            code: errorCode,
+            request_id: runId
+          });
+        }
       }
 
       const stageStartedAt = Date.now();
@@ -178,6 +197,30 @@ class ArticleController {
         const errorCode = 'INVALID_INPUT';
         ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
         return res.status(400).json({ error: 'Outline is required', code: errorCode, request_id: runId });
+      }
+
+      // project_id 由前端提供時，需驗證權限；匿名模式則不允許綁定既有專案
+      if (project_id) {
+        if (!req.user) {
+          const errorCode = 'AUTH_REQUIRED_FOR_PROJECT';
+          ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
+          return res.status(401).json({
+            error: 'Login required when project_id is provided',
+            code: errorCode,
+            request_id: runId
+          });
+        }
+
+        const project = await ProjectModel.findById(project_id);
+        if (!project || project.user_id !== req.user.id) {
+          const errorCode = 'PROJECT_ACCESS_DENIED';
+          ObservabilityService.finishRun(runId, { success: false, error_code: errorCode });
+          return res.status(403).json({
+            error: 'Access denied. You do not own this project.',
+            code: errorCode,
+            request_id: runId
+          });
+        }
       }
 
       // Brief preflight validation (per backend/docs/CONTENT_CONFIG_SCHEMA.md)

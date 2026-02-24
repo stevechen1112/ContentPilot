@@ -84,6 +84,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Backward-compatible API health endpoint (used by external scripts/monitoring)
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV
+  });
+});
+
 // Error Handling
 app.use((err, req, res, next) => {
   console.error(err.stack);

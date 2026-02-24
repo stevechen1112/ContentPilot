@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 
 const SALT_ROUNDS = 10;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_key_123';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 
 exports.register = async (req, res) => {
   try {
@@ -21,7 +22,7 @@ exports.register = async (req, res) => {
     const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
     const newUser = await UserModel.create({ email, password_hash, name });
 
-    const token = jwt.sign({ userId: newUser.id, email: newUser.email }, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign({ userId: newUser.id, email: newUser.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     res.status(201).json({
       message: 'User registered successfully',
@@ -52,7 +53,7 @@ exports.login = async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     res.json({
       message: 'Login successful',

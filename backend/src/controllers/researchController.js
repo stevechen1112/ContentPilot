@@ -46,6 +46,10 @@ class ResearchController {
         return res.status(400).json({ error: 'Project ID and keywords array are required' });
       }
 
+      if (!req.user) {
+        return res.status(401).json({ error: 'Login required for project-bound batch analysis' });
+      }
+
       // 檢查專案所有權
       const project = await ProjectModel.findById(project_id);
       if (!project) {
@@ -139,6 +143,10 @@ class ResearchController {
       // 如果有 project_id，驗證所有權後儲存
       let savedKeywords = [];
       if (project_id && expandedKeywords.length > 0) {
+        if (!req.user) {
+          return res.status(401).json({ error: 'Login required for project-bound keyword expansion' });
+        }
+
         const project = await ProjectModel.findById(project_id);
         if (!project || project.user_id !== req.user.id) {
           return res.status(403).json({ error: 'Forbidden: not your project' });
