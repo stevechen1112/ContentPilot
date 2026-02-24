@@ -599,9 +599,8 @@ ${html}
 
       const sourceAvailability = this.buildSourceAvailability(verifiedSources, minSourcesRequired, contentDomain);
       if (!sourceAvailability.passed) {
-        const err = new Error(`source_minimum_not_met: 需要至少 ${minSourcesRequired} 個來源，實得 ${sourceAvailability.available}`);
-        err.code = 'SOURCE_MINIMUM_NOT_MET';
-        throw err;
+        // 來源不足時記錄警告但繼續生成，不強制中斷（避免因 Librarian 搜尋結果不穩定而封鎖正常流程）
+        console.warn(`⚠️ [來源不足] 需要 ${minSourcesRequired} 個，實得 ${sourceAvailability.available} 個，將以現有來源繼續生成`);
       }
 
       // 逐段生成文章
