@@ -140,9 +140,9 @@ class ResearchController {
         ...related.relatedSearches.map(rs => rs.query)
       ].filter(Boolean);
 
-      // 如果有 project_id，驗證所有權後儲存
+      // 如果有 project_id，先驗證身份與專案所有權（無論是否有擴展結果）
       let savedKeywords = [];
-      if (project_id && expandedKeywords.length > 0) {
+      if (project_id) {
         if (!req.user) {
           return res.status(401).json({ error: 'Login required for project-bound keyword expansion' });
         }
@@ -151,6 +151,19 @@ class ResearchController {
         if (!project || project.user_id !== req.user.id) {
           return res.status(403).json({ error: 'Forbidden: not your project' });
         }
+
+        if (expandedKeywords.length === 0) {
+          return res.json({
+            message: 'Keywords expanded successfully',
+            data: {
+              seed_keyword,
+              expanded_count: 0,
+              keywords: [],
+              saved_count: 0
+            }
+          });
+        }
+
         const keywordsToSave = expandedKeywords.map(kw => ({
           keyword: kw,
           priority: 'low' // 擴展的關鍵字預設為低優先級
