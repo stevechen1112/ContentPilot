@@ -16,6 +16,7 @@ const aiGenerationLimiter = rateLimit({
 // 大綱與文章生成 - 使用 optionalAuth 允許無需登入即可使用（POC 模式）
 router.post('/generate-outline', aiGenerationLimiter, optionalAuth, articleController.generateOutline);
 router.post('/generate', aiGenerationLimiter, optionalAuth, articleController.generateArticle);
+router.get('/:id', optionalAuth, articleController.getArticleById);
 
 // 其他路由需要驗證
 router.use(authenticateToken);
@@ -24,7 +25,6 @@ router.post('/generate-section-stream', articleController.generateSectionStream)
 // 文章管理
 router.get('/', articleController.getArticles);
 router.get('/observability/summary', articleController.getObservabilitySummary);
-router.get('/:id', articleController.getArticleById);
 router.put('/:id', articleController.updateArticle);
 router.delete('/:id', articleController.deleteArticle);
 

@@ -12,6 +12,8 @@ const {
 } = require('../services/contentBrief');
 
 class ArticleController {
+  static DEFAULT_ANON_USER_ID = '00000000-0000-0000-0000-000000000000';
+
   /**
    * 生成文章大綱
    * POST /api/articles/generate-outline
@@ -742,8 +744,16 @@ class ArticleController {
 
       // 驗證權限：確認文章所屬專案是當前使用者的
       const project = await ProjectModel.findById(article.project_id);
-      if (!project || project.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied. You do not own this article.' });
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found for this article' });
+      }
+
+      if (req.user) {
+        if (project.user_id !== req.user.id) {
+          return res.status(403).json({ error: 'Access denied. You do not own this article.' });
+        }
+      } else if (project.user_id !== ArticleController.DEFAULT_ANON_USER_ID) {
+        return res.status(401).json({ error: 'Login required to view this article.' });
       }
 
       const ensureObject = (data) => {
