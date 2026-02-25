@@ -40,16 +40,9 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token 過期或無效：清除本地狀態，再跳轉登入頁
+      // Token 過期或無效：清除本地狀態；免登入模式不強制跳轉
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth-storage-v3');
-      // 用 setTimeout 讓當前 catch 有機會先執行（例如 SERP 失敗可繼續）
-      // 但因為這是真正的 auth 失敗，仍需導向登入
-      setTimeout(() => {
-        if (!localStorage.getItem('auth_token')) {
-          window.location.href = '/login';
-        }
-      }, 100);
     }
     // 429 Rate Limit — 給予使用者可操作的提示
     if (error.response?.status === 429) {
@@ -65,10 +58,9 @@ setInterval(() => {
   if (!token) return;
   const exp = getTokenExpiry(token);
   if (exp && Date.now() / 1000 > exp) {
-    // Token 已過期，清除並跳轉
+    // Token 已過期，清除即可（免登入模式）
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth-storage-v3');
-    window.location.href = '/login';
   }
 }, 5 * 60 * 1000);
 
@@ -111,20 +103,24 @@ export const researchAPI = {
 
 // ==================== Article API ====================
 export const articleAPI = {
-  generateOutline: (keyword: string, projectId: string, serpData: any, options: any = {}) =>
-    apiClient.post('/articles/generate-outline', {
+  generateOutline: (keyword: string, projectId: string | null, serpData: any, options: any = {}) => {
+    const payload: any = {
       keyword,
-      project_id: projectId,
       serp_data: serpData,
       ...options
-    }),
-  generate: (projectId: string, keywordId: string | null, outline: any, options: any = {}) =>
-    apiClient.post('/articles/generate', {
-      project_id: projectId,
+    };
+    if (projectId) payload.project_id = projectId;
+    return apiClient.post('/articles/generate-outline', payload);
+  },
+  generate: (projectId: string | null, keywordId: string | null, outline: any, options: any = {}) => {
+    const payload: any = {
       keyword_id: keywordId,
       outline,
       ...options
-    }),
+    };
+    if (projectId) payload.project_id = projectId;
+    return apiClient.post('/articles/generate', payload);
+  },
   getAll: (projectId: string, status?: string) =>
     apiClient.get('/articles', { params: { project_id: projectId, status } }),
   getById: (id: string) => apiClient.get(`/articles/${id}`),

@@ -57,6 +57,15 @@ export default function ArticleGenerationPage() {
   // Auto-initialize project
   useEffect(() => {
     const initProject = async () => {
+      const token = localStorage.getItem('auth_token');
+
+      // 未登入模式：允許匿名生成（不綁 project_id）
+      if (!token) {
+        setCurrentProject(null as any);
+        setInitializing(false);
+        return;
+      }
+
       // If we already have a current project, don't do anything
       if (currentProject) {
         setInitializing(false);
@@ -110,7 +119,11 @@ export default function ArticleGenerationPage() {
       return;
     }
 
-    if (!currentProject) {
+    const token = localStorage.getItem('auth_token');
+    const useAnonymousMode = !token;
+    const activeProjectId = currentProject?.id || null;
+
+    if (!useAnonymousMode && !activeProjectId) {
       setNotification({ type: 'error', message: '系統初始化中，請稍後再試' });
       return;
     }
@@ -143,7 +156,12 @@ export default function ArticleGenerationPage() {
       };
 
       setGenerationStatus('正在根據 SERP 資料與您的獨特觀點生成大綱...');
-      const outlineRes = await articleAPI.generateOutline(keyword, currentProject.id, serpData, defaultSettings);
+      const outlineRes = await articleAPI.generateOutline(
+        keyword,
+        useAnonymousMode ? null : activeProjectId,
+        serpData,
+        defaultSettings
+      );
       const rawOutline = outlineRes.data.data;
 
       // 捕捉 SERP 覆蓋率與來源供前端展示
@@ -160,7 +178,12 @@ export default function ArticleGenerationPage() {
       }
 
       setGenerationStatus('正在撰寫完整文章內容（預計 5-10 分鐘，請耐心等待）...');
-      const articleRes = await articleAPI.generate(currentProject.id, null, rawOutline, defaultSettings);
+      const articleRes = await articleAPI.generate(
+        useAnonymousMode ? null : activeProjectId,
+        null,
+        rawOutline,
+        defaultSettings
+      );
 
       setNotification({ type: 'success', message: '文章生成成功！' });
 
